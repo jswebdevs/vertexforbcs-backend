@@ -160,6 +160,8 @@ export const controllerLogin = async (req, res) => {
   }
 };
 
+
+
 // --------------------
 // SYNC USER (Firebase)
 // --------------------
@@ -253,20 +255,52 @@ export const syncUser = async (req, res) => {
 // --------------------
 // ADMIN CRUD OPERATIONS
 // --------------------
+// --------------------
+// GET ALL USERS (Public - Filtered)
+// --------------------
 export const getUsers = async (req, res) => {
   try {
-    console.log("[getUsers] Admin Requested User List:", req.user?.username);
-    const users = await User.find();
-    res.json(users);
+    console.log("[getUsers] Fetching all students (public with filters)");
+
+    // ✅ Find only students and exclude sensitive fields
+    const users = await User.find({ userType: "student" }) // ✅ Filter for students only
+      .select('-password -firebaseUID -contactNO -trxID -numberUsed -paymentMethod')
+      .sort({ joinedAt: -1 }) // Sort by newest first
+      .lean(); // Convert to plain JavaScript objects for better performance
+
+    // ✅ Additional filtering - only return necessary public info
+    const publicUsers = users.map(user => ({
+      _id: user._id,
+      firstName: user.firstName,
+      lastName: user.lastName,
+      username: user.username,
+      email: user.email,
+      avatar: user.avatar,
+      userType: user.userType,
+      status: user.status,
+      joinedAt: user.joinedAt,
+      courses: user.courses?.map(course => ({
+        course_id: course.course_id,
+        title: course.title,
+      })) || [],
+    }));
+
+    console.log(`[getUsers] Returning ${publicUsers.length} students`);
+    res.json(publicUsers);
   } catch (err) {
     console.error("[getUsers] Error:", err);
-    res.status(500).json({ message: "Server error" });
+    res.status(500).json({ message: "Server error fetching users" });
   }
 };
 
+
+// --------------------
+// GET SINGLE USER
+// --------------------
+
 export const getUser = async (req, res) => {
   try {
-    console.log("[getUser] Fetching user ID:", req.params.id);
+
     const user = await User.findById(req.params.id);
     if (!user) return res.status(404).json({ message: "User not found" });
     res.json(user);

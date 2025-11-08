@@ -39,7 +39,7 @@ const courseSchema = new mongoose.Schema(
 
     subscription: {
       billingCycle: { type: String, default: "monthly" },
-      currency: { type: String, default: "USD" },
+      currency: { type: String, default: "BDT" },
       amount: { type: Number, required: true },
       trialPeriodDays: { type: Number, default: 0 },
       active: { type: Boolean, default: true },

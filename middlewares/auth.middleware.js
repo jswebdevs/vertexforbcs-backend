@@ -17,13 +17,13 @@ export const verifyToken = async (req, res, next) => {
 
     // If missing
     if (!token) {
-      console.warn("[verifyToken] Token missing from header");
+
       return res.status(401).json({ message: "Authorization token missing" });
     }
 
     // Verify & Decode
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
-    console.log("[verifyToken] Token decoded:", decoded);
+  
 
     // Find matching user
     const user = await User.findById(decoded.id).select("-password");

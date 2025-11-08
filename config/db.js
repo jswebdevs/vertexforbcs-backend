@@ -22,8 +22,6 @@ export const connectDB = async () => {
 
     console.log(`✅ MongoDB connected`);
 
-    // ------- Optional Debug (enabled during development) -------
-    mongoose.set("debug", process.env.NODE_ENV !== "production");
 
     // Connection Events
     mongoose.connection.on("connected", () => {

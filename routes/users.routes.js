@@ -1,4 +1,5 @@
 import express from "express";
+import rateLimit from "express-rate-limit";
 import {
   controllerSignup,
   controllerLogin,
@@ -19,11 +20,45 @@ import {
 const router = express.Router();
 
 // --------------------------------------------------
+// RATE LIMITERS
+// --------------------------------------------------
+
+// Rate limiter for public user list endpoint
+const getUsersLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 100, // Limit each IP to 100 requests per 15 minutes
+  message: {
+    error: "Too many requests from this IP, please try again later.",
+  },
+  standardHeaders: true, // Return rate limit info in the `RateLimit-*` headers
+  legacyHeaders: false, // Disable the `X-RateLimit-*` headers
+});
+
+// Rate limiter for login attempts
+const loginLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 10, // Limit each IP to 10 login attempts per 15 minutes
+  message: {
+    error: "Too many login attempts, please try again after 15 minutes.",
+  },
+  skipSuccessfulRequests: true, // Don't count successful logins
+});
+
+// Rate limiter for registration
+const registerLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000, // 1 hour
+  max: 5, // Limit each IP to 5 registrations per hour
+  message: {
+    error: "Too many registration attempts, please try again later.",
+  },
+});
+
+// --------------------------------------------------
 // PUBLIC ROUTES
 // --------------------------------------------------
 
-// Student Registration (Public)
-router.post("/register-student", async (req, res) => {
+// Student Registration (Public with rate limiting)
+router.post("/register-student", registerLimiter, async (req, res) => {
   console.log("[users.routes] POST /register-student");
   await registerStudent(req, res);
 });
@@ -34,14 +69,14 @@ router.get("/check-username/:value", async (req, res) => {
   await checkUsernameOrEmail(req, res);
 });
 
-// Generic Signup (e.g., Admin creation)
-router.post("/signup", async (req, res) => {
+// Generic Signup (e.g., Admin creation with rate limiting)
+router.post("/signup", registerLimiter, async (req, res) => {
   console.log("[users.routes] POST /signup");
   await controllerSignup(req, res);
 });
 
-// Controller-based login
-router.post("/login", async (req, res) => {
+// Controller-based login (with rate limiting)
+router.post("/login", loginLimiter, async (req, res) => {
   console.log("[users.routes] POST /login");
   await controllerLogin(req, res);
 });
@@ -52,6 +87,12 @@ router.post("/sync", async (req, res) => {
   await syncUser(req, res);
 });
 
+// ✅ Get all users (Public with rate limiting - sensitive data filtered)
+router.get("/", getUsersLimiter, async (req, res) => {
+  console.log("[users.routes] GET / (Public) - Fetch all users");
+  await getUsers(req, res);
+});
+
 // --------------------------------------------------
 // STUDENT-PROTECTED ROUTES
 // --------------------------------------------------
@@ -60,7 +101,7 @@ router.post("/sync", async (req, res) => {
 router.get("/me", verifyToken, studentOnly, async (req, res) => {
   console.log("[users.routes] GET /me (Student self profile)");
   try {
-    // return student info (populated by verifyToken)
+    // Return student info (populated by verifyToken)
     res.status(200).json(req.user);
   } catch (err) {
     console.error("[users.routes] Error fetching student profile:", err);
@@ -71,12 +112,6 @@ router.get("/me", verifyToken, studentOnly, async (req, res) => {
 // --------------------------------------------------
 // ADMIN + GENERAL PROTECTED ROUTES
 // --------------------------------------------------
-
-// Admin: View all users
-router.get("/", verifyToken, adminOnly, async (req, res) => {
-  console.log("[users.routes] GET / (Admin) - Fetch all users");
-  await getUsers(req, res);
-});
 
 // Admin OR self-access to single user
 router.get("/:id", verifyToken, async (req, res) => {

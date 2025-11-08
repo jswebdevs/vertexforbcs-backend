@@ -1,15 +1,16 @@
-const express = require("express");
-const router = express.Router();
-const multer = require("multer");
-const path = require("path");
-const fs = require("fs");
-const {
+import express from "express";
+import multer from "multer";
+import path from "path";
+import fs from "fs";
+import {
   addMedia,
   getAllMedia,
   getMediaById,
   updateMedia,
   deleteMedia,
-} = require("../controllers/media.controller");
+} from "../controllers/media.controller.js";
+
+const router = express.Router();
 
 // === Ensure upload folders exist ===
 const folders = ["uploads/img", "uploads/vid", "uploads/docs"];
@@ -53,4 +54,4 @@ router.get("/:id", getMediaById);
 router.put("/:id", updateMedia);
 router.delete("/:id", deleteMedia);
 
-module.exports = router;
+export default router;

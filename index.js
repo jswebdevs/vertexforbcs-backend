@@ -4,8 +4,16 @@ import express from "express";
 import cors from "cors";
 import dotenv from "dotenv";
 import { connectDB } from "./config/db.js";
+
+// -------------------------------
+// IMPORT ROUTES
+// -------------------------------
+
 import userRoutes from "./routes/users.routes.js";
 import courseRoutes from "./routes/courses.routes.js";
+import mediaRoutes from "./routes/media.routes.js";
+
+
 
 dotenv.config();
 
@@ -57,6 +65,7 @@ app.get("/", (req, res) => {
 // -------------------------------
 app.use("/api/users", userRoutes);
 app.use("/api/courses", courseRoutes);
+app.use("/api/media", mediaRoutes);
 
 // -------------------------------
 // START SERVER

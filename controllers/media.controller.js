@@ -1,9 +1,14 @@
-const { getDB } = require("../config/db");
-const path = require("path");
-const fs = require("fs");
-const sharp = require("sharp");
-const ffmpeg = require("fluent-ffmpeg");
-const { ObjectId } = require("mongodb");
+import path from "path";
+import fs from "fs";
+import sharp from "sharp";
+import ffmpeg from "fluent-ffmpeg";
+import { fileURLToPath } from "url";
+import { dirname } from "path";
+import Media from "../models/Media.model.js";
+
+// Get __dirname equivalent in ES modules
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
 
 // --- Set ffmpeg binary paths (adjust for Linux or Windows) ---
 ffmpeg.setFfmpegPath("C:\\ffm\\bin\\ffmpeg.exe");
@@ -44,15 +49,13 @@ async function generateVideoThumb(filePath, thumbPath) {
 }
 
 // === ADD MEDIA ===
-async function addMedia(req, res) {
+export async function addMedia(req, res) {
   try {
     const files = req.files;
     if (!files || files.length === 0) {
       return res.status(400).json({ error: "No files uploaded" });
     }
 
-    const db = getDB();
-    const mediaCollection = db.collection("media");
     const mediaDocs = [];
 
     // ✅ Use your production domain always
@@ -107,8 +110,8 @@ async function addMedia(req, res) {
       })
     );
 
-    await mediaCollection.insertMany(mediaDocs);
-    res.status(201).json(mediaDocs);
+    const savedMedia = await Media.insertMany(mediaDocs);
+    res.status(201).json(savedMedia);
   } catch (err) {
     console.error("❌ Add media error:", err);
     res.status(500).json({ error: err.message });
@@ -116,32 +119,28 @@ async function addMedia(req, res) {
 }
 
 // === GET ALL MEDIA ===
-async function getAllMedia(req, res) {
+export async function getAllMedia(req, res) {
   try {
     const { search, type, fromDate, toDate, limit = 20, page = 1 } = req.query;
     const query = {};
 
-    if (search)
+    if (search) {
       query.$or = [
         { originalName: { $regex: search, $options: "i" } },
         { tags: { $in: [new RegExp(search, "i")] } },
       ];
+    }
 
     if (type) query.mimeType = { $regex: type, $options: "i" };
     if (fromDate) query.uploadDate = { ...query.uploadDate, $gte: new Date(fromDate) };
     if (toDate) query.uploadDate = { ...query.uploadDate, $lte: new Date(toDate) };
 
-    const db = getDB();
-    const mediaCollection = db.collection("media");
-
-    const media = await mediaCollection
-      .find(query)
+    const media = await Media.find(query)
       .sort({ uploadDate: -1 })
       .skip((page - 1) * parseInt(limit))
-      .limit(parseInt(limit))
-      .toArray();
+      .limit(parseInt(limit));
 
-    const total = await mediaCollection.countDocuments(query);
+    const total = await Media.countDocuments(query);
     res.json({ media, total, page: parseInt(page), limit: parseInt(limit) });
   } catch (err) {
     console.error("❌ Get all media error:", err);
@@ -150,11 +149,10 @@ async function getAllMedia(req, res) {
 }
 
 // === GET MEDIA BY ID ===
-async function getMediaById(req, res) {
+export async function getMediaById(req, res) {
   try {
     const { id } = req.params;
-    const db = getDB();
-    const media = await db.collection("media").findOne({ _id: new ObjectId(id) });
+    const media = await Media.findById(id);
 
     if (!media) return res.status(404).json({ error: "Media not found" });
     res.json(media);
@@ -165,19 +163,19 @@ async function getMediaById(req, res) {
 }
 
 // === UPDATE MEDIA ===
-async function updateMedia(req, res) {
+export async function updateMedia(req, res) {
   try {
     const { id } = req.params;
     const { title, description, altText, tags } = req.body;
 
-    const db = getDB();
-    const result = await db.collection("media").updateOne(
-      { _id: new ObjectId(id) },
-      { $set: { title, description, altText, tags: tags ? tags.split(",") : [] } }
+    const media = await Media.findByIdAndUpdate(
+      id,
+      { title, description, altText, tags: tags ? tags.split(",") : [] },
+      { new: true }
     );
 
-    if (result.matchedCount === 0) return res.status(404).json({ error: "Media not found" });
-    res.json({ message: "✅ Media updated successfully" });
+    if (!media) return res.status(404).json({ error: "Media not found" });
+    res.json({ message: "✅ Media updated successfully", media });
   } catch (err) {
     console.error("❌ Update media error:", err);
     res.status(500).json({ error: err.message });
@@ -185,11 +183,10 @@ async function updateMedia(req, res) {
 }
 
 // === DELETE MEDIA ===
-async function deleteMedia(req, res) {
+export async function deleteMedia(req, res) {
   try {
     const { id } = req.params;
-    const db = getDB();
-    const media = await db.collection("media").findOne({ _id: new ObjectId(id) });
+    const media = await Media.findById(id);
 
     if (!media) return res.status(404).json({ error: "Media not found" });
 
@@ -214,12 +211,10 @@ async function deleteMedia(req, res) {
       console.warn("⚠️ Thumbnail delete failed:", err.message);
     }
 
-    await db.collection("media").deleteOne({ _id: new ObjectId(id) });
+    await Media.findByIdAndDelete(id);
     res.json({ message: "✅ Media deleted successfully" });
   } catch (err) {
     console.error("❌ Delete media error:", err);
     res.status(500).json({ error: err.message });
   }
 }
-
-module.exports = { addMedia, getAllMedia, getMediaById, updateMedia, deleteMedia };
