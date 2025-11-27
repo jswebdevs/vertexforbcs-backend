@@ -4,24 +4,22 @@ import sharp from "sharp";
 import ffmpeg from "fluent-ffmpeg";
 import { fileURLToPath } from "url";
 import { dirname } from "path";
-import Media from "../models/Media.model.js";
+import Media from "../models/media.model.js";
 
-// Get __dirname equivalent in ES modules
+// ESM __dirname replacement
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
-// --- Set ffmpeg binary paths (adjust for Linux or Windows) ---
+// ffmpeg binary setup
 ffmpeg.setFfmpegPath("C:\\ffm\\bin\\ffmpeg.exe");
 ffmpeg.setFfprobePath("C:\\ffm\\bin\\ffprobe.exe");
 
-// --- Determine folder type by MIME ---
 function getFolderByMime(mime) {
   if (mime.startsWith("image/")) return "img";
   if (mime.startsWith("video/")) return "vid";
   return "docs";
 }
 
-// --- Generate thumbnail for images ---
 async function generateImageThumb(filePath, thumbPath) {
   try {
     await sharp(filePath).resize(200, 200, { fit: "inside" }).toFile(thumbPath);
@@ -30,7 +28,6 @@ async function generateImageThumb(filePath, thumbPath) {
   }
 }
 
-// --- Generate thumbnail for videos ---
 async function generateVideoThumb(filePath, thumbPath) {
   return new Promise((resolve) => {
     ffmpeg(filePath)
@@ -43,26 +40,18 @@ async function generateVideoThumb(filePath, thumbPath) {
         count: 1,
         folder: path.dirname(thumbPath),
         filename: path.basename(thumbPath),
-        size: "160x?",
+        size: "160x?"
       });
   });
 }
 
-// === ADD MEDIA ===
 export async function addMedia(req, res) {
   try {
     const files = req.files;
-    if (!files || files.length === 0) {
-      return res.status(400).json({ error: "No files uploaded" });
-    }
+    if (!files || files.length === 0) return res.status(400).json({ error: "No files uploaded" });
 
+    const baseUrl = "http://localhost:5000"; // adjust as needed
     const mediaDocs = [];
-
-    // ✅ Use your production domain always
-    const baseUrl =
-      process.env.NODE_ENV === "production"
-        ? "https://backend.rajproperty.site"
-        : `${req.protocol}://${req.get("host")}`;
 
     await Promise.all(
       files.map(async (file) => {
@@ -93,7 +82,7 @@ export async function addMedia(req, res) {
           console.warn(`⚠️ Thumbnail generation failed for ${file.filename}:`, err.message);
         }
 
-        mediaDocs.push({
+        const doc = {
           filename: file.filename,
           originalName: file.originalname,
           mimeType: file.mimetype,
@@ -106,31 +95,28 @@ export async function addMedia(req, res) {
           description: req.body.description || "",
           altText: req.body.altText || "",
           tags: req.body.tags ? req.body.tags.split(",") : [],
-        });
+        };
+        mediaDocs.push(doc);
       })
     );
 
-    const savedMedia = await Media.insertMany(mediaDocs);
-    res.status(201).json(savedMedia);
+    const created = await Media.insertMany(mediaDocs);
+    res.status(201).json(created);
   } catch (err) {
     console.error("❌ Add media error:", err);
     res.status(500).json({ error: err.message });
   }
 }
 
-// === GET ALL MEDIA ===
 export async function getAllMedia(req, res) {
   try {
     const { search, type, fromDate, toDate, limit = 20, page = 1 } = req.query;
     const query = {};
-
-    if (search) {
+    if (search)
       query.$or = [
         { originalName: { $regex: search, $options: "i" } },
         { tags: { $in: [new RegExp(search, "i")] } },
       ];
-    }
-
     if (type) query.mimeType = { $regex: type, $options: "i" };
     if (fromDate) query.uploadDate = { ...query.uploadDate, $gte: new Date(fromDate) };
     if (toDate) query.uploadDate = { ...query.uploadDate, $lte: new Date(toDate) };
@@ -139,7 +125,6 @@ export async function getAllMedia(req, res) {
       .sort({ uploadDate: -1 })
       .skip((page - 1) * parseInt(limit))
       .limit(parseInt(limit));
-
     const total = await Media.countDocuments(query);
     res.json({ media, total, page: parseInt(page), limit: parseInt(limit) });
   } catch (err) {
@@ -148,12 +133,10 @@ export async function getAllMedia(req, res) {
   }
 }
 
-// === GET MEDIA BY ID ===
 export async function getMediaById(req, res) {
   try {
     const { id } = req.params;
     const media = await Media.findById(id);
-
     if (!media) return res.status(404).json({ error: "Media not found" });
     res.json(media);
   } catch (err) {
@@ -162,32 +145,32 @@ export async function getMediaById(req, res) {
   }
 }
 
-// === UPDATE MEDIA ===
 export async function updateMedia(req, res) {
   try {
     const { id } = req.params;
     const { title, description, altText, tags } = req.body;
-
-    const media = await Media.findByIdAndUpdate(
+    const updated = await Media.findByIdAndUpdate(
       id,
-      { title, description, altText, tags: tags ? tags.split(",") : [] },
+      {
+        title,
+        description,
+        altText,
+        tags: tags ? tags.split(",") : [],
+      },
       { new: true }
     );
-
-    if (!media) return res.status(404).json({ error: "Media not found" });
-    res.json({ message: "✅ Media updated successfully", media });
+    if (!updated) return res.status(404).json({ error: "Media not found" });
+    res.json({ message: "✅ Media updated successfully", media: updated });
   } catch (err) {
     console.error("❌ Update media error:", err);
     res.status(500).json({ error: err.message });
   }
 }
 
-// === DELETE MEDIA ===
 export async function deleteMedia(req, res) {
   try {
     const { id } = req.params;
     const media = await Media.findById(id);
-
     if (!media) return res.status(404).json({ error: "Media not found" });
 
     try {

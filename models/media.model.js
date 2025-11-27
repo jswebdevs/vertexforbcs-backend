@@ -1,3 +1,4 @@
+//backend/models/media.model.js
 import mongoose from "mongoose";
 
 const mediaSchema = new mongoose.Schema({
@@ -18,3 +19,4 @@ const mediaSchema = new mongoose.Schema({
 const Media = mongoose.model("Media", mediaSchema);
 
 export default Media;
+

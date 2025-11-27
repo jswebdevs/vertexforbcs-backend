@@ -60,11 +60,10 @@ const userSchema = new mongoose.Schema({
   avatar: { type: String },
   lastLogin: { type: Date },
 
-  // Firebase/Auth integration
-  firebaseUID: { type: String, unique: true, sparse: true },
+  // Login method (only controller-based login allowed)
   loginMethod: {
     type: String,
-    enum: ["controller", "firebase", "google"],
+    enum: ["controller"], // Only support controller login
     default: "controller",
   },
 });

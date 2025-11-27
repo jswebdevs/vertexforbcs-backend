@@ -6,12 +6,12 @@ import Course from "../models/courses.model.js";
 // CREATE NEW COURSE  (Admin only, with multer)
 // --------------------------------------------------
 export const createCourse = async (req, res) => {
-  console.log("POST BODY:", req.body);
+
+  console.log("[DEBUG] req.body:", req.body);
+
   if (req.files) console.log("POST FILES:", req.files);
 
   try {
-    // Multer parses dot-notation ("subscription.amount") into req.body['subscription.amount']
-    // Manually construct the data object
     const {
       title,
       description,
@@ -32,7 +32,6 @@ export const createCourse = async (req, res) => {
       "subscription.active": subscriptionActive,
     } = req.body;
 
-    // Parse tags JSON array if sent as string or comma-separated
     let tagsArr = [];
     if (tags) {
       try {
@@ -42,7 +41,6 @@ export const createCourse = async (req, res) => {
       }
     }
 
-    // Parse syllabus JSON if sent as string.
     let syllabusArr = [];
     if (req.body.syllabus) {
       try {
@@ -52,7 +50,6 @@ export const createCourse = async (req, res) => {
       }
     }
 
-    // Handle image uploads
     let courseImage = "";
     if (req.files && req.files["courseImage"] && req.files["courseImage"][0]) {
       courseImage = req.files["courseImage"][0].filename;
@@ -63,7 +60,6 @@ export const createCourse = async (req, res) => {
       imageGallery = req.files["imageGallery"].map((f) => f.filename);
     }
 
-    // Mongoose nested field for subscription
     const subscription = {
       amount: parseFloat(subscriptionAmount),
       billingCycle: billingCycle || "monthly",
@@ -72,7 +68,6 @@ export const createCourse = async (req, res) => {
       active: subscriptionActive !== undefined ? subscriptionActive : true,
     };
 
-    // Build the course object for Mongoose
     const courseData = {
       title,
       description,
@@ -98,26 +93,31 @@ export const createCourse = async (req, res) => {
     }
 
     // Create and save the course
-    const newCourse = new Course(courseData);
-    await newCourse.save();
+    const savedCourse = await new Course(courseData).save();
+    if (!savedCourse || !savedCourse._id) {
+      console.error("[courses.controller] ERROR: Save returned null/invalid", savedCourse);
+      return res.status(500).json({ message: "Failed to save course" });
+    }
 
-    console.log("[courses.controller] New course created:", newCourse.title);
+    console.log("[courses.controller] New course created:", savedCourse.title, savedCourse._id);
     res.status(201).json({
       message: "Course created successfully",
-      course: newCourse,
+      course: savedCourse,
     });
+
   } catch (error) {
     console.error("[courses.controller] Error creating course:", error);
     res.status(500).json({ message: "Server error creating course" });
   }
 };
 
+
 // --------------------------------------------------
 // GET ALL COURSES  (Public / Student)
 // --------------------------------------------------
 export const getAllCourses = async (req, res) => {
   try {
-    const courses = await Course.find({ status: "published" }).sort({
+    const courses = await Course.find().sort({
       createdAt: -1,
     });
     res.status(200).json(courses);

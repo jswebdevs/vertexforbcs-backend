@@ -1,10 +1,11 @@
+// backend/routes/users.routes.js
+
 import express from "express";
 import rateLimit from "express-rate-limit";
 import {
   controllerSignup,
   controllerLogin,
   registerStudent,
-  syncUser,
   getUsers,
   getUser,
   updateUser,
@@ -30,8 +31,8 @@ const getUsersLimiter = rateLimit({
   message: {
     error: "Too many requests from this IP, please try again later.",
   },
-  standardHeaders: true, // Return rate limit info in the `RateLimit-*` headers
-  legacyHeaders: false, // Disable the `X-RateLimit-*` headers
+  standardHeaders: true,
+  legacyHeaders: false,
 });
 
 // Rate limiter for login attempts
@@ -41,7 +42,7 @@ const loginLimiter = rateLimit({
   message: {
     error: "Too many login attempts, please try again after 15 minutes.",
   },
-  skipSuccessfulRequests: true, // Don't count successful logins
+  skipSuccessfulRequests: true,
 });
 
 // Rate limiter for registration
@@ -81,12 +82,6 @@ router.post("/login", loginLimiter, async (req, res) => {
   await controllerLogin(req, res);
 });
 
-// Firebase Sync (Google Sign-In)
-router.post("/sync", async (req, res) => {
-  console.log("[users.routes] POST /sync");
-  await syncUser(req, res);
-});
-
 // ✅ Get all users (Public with rate limiting - sensitive data filtered)
 router.get("/", getUsersLimiter, async (req, res) => {
   console.log("[users.routes] GET / (Public) - Fetch all users");
@@ -101,7 +96,6 @@ router.get("/", getUsersLimiter, async (req, res) => {
 router.get("/me", verifyToken, studentOnly, async (req, res) => {
   console.log("[users.routes] GET /me (Student self profile)");
   try {
-    // Return student info (populated by verifyToken)
     res.status(200).json(req.user);
   } catch (err) {
     console.error("[users.routes] Error fetching student profile:", err);
@@ -118,8 +112,6 @@ router.get("/:id", verifyToken, async (req, res) => {
   console.log("[users.routes] GET /:id (Admin or self) -", req.params.id);
   try {
     const { id } = req.params;
-
-    // Allow admin OR self-user
     if (req.user.userType === "admin" || req.user._id.toString() === id) {
       await getUser(req, res);
     } else {
