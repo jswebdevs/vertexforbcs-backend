@@ -20,8 +20,6 @@ export const connectDB = async () => {
       serverSelectionTimeoutMS: 20000, // Server selection timeout
     });
 
-    console.log(`✅ MongoDB connected`);
-
 
     // Connection Events
     mongoose.connection.on("connected", () => {

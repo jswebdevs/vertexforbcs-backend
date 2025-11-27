@@ -5,6 +5,27 @@ import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 
 // --------------------
+// HELPER: CALCULATE EXPIRY DATE
+// --------------------
+const calculateExpiryDate = (plan) => {
+  const now = new Date();
+  switch (plan) {
+    case "1M":
+      return new Date(now.setDate(now.getDate() + 30));
+    case "2M":
+      return new Date(now.setDate(now.getDate() + 60));
+    case "3M":
+      return new Date(now.setDate(now.getDate() + 90));
+    case "6M":
+      return new Date(now.setDate(now.getDate() + 180));
+    case "Lifetime":
+      return new Date(now.setFullYear(now.getFullYear() + 100));
+    default:
+      return new Date(now.setDate(now.getDate() + 30)); // Default 1 month
+  }
+};
+
+// --------------------
 // STUDENT REGISTRATION CONTROLLER
 // --------------------
 export const registerStudent = async (req, res) => {
@@ -13,12 +34,12 @@ export const registerStudent = async (req, res) => {
       firstName,
       lastName,
       email,
-      password, // Add password (required)
+      password,
       contactNO,
       paymentMethod,
       trxID,
       numberUsed,
-      courses,
+      courses, // Array of { courseId, plan } coming from frontend
     } = req.body;
 
     if (!email || !firstName || !lastName || !password) {
@@ -32,6 +53,25 @@ export const registerStudent = async (req, res) => {
       return res.status(400).json({ message: "Student already registered" });
     }
 
+    // -------------------------------------------------
+    // Process Courses & Calculate Expiry
+    // -------------------------------------------------
+    let processedCourses = [];
+    if (courses && Array.isArray(courses)) {
+      processedCourses = courses.map((c) => {
+        // Ensure we have a plan, default to 1M if missing
+        const plan = c.plan || "1M";
+        return {
+          courseId: c.courseId, // Matches new Model
+          title: c.title || "", // Optional
+          plan: plan,
+          startDate: new Date(),
+          expiryDate: calculateExpiryDate(plan), // CALCULATE EXPIRY HERE
+          isActive: true,
+        };
+      });
+    }
+
     const newStudent = await User.create({
       firstName,
       lastName,
@@ -41,15 +81,15 @@ export const registerStudent = async (req, res) => {
       paymentMethod,
       trxID,
       numberUsed,
-      courses,
+      courses: processedCourses, // Save the processed array
       userType: "student",
-      status: "active",
+      status: "active", // Or "hold" if you verify payments manually
       loginMethod: "controller",
     });
 
     console.log("[registerStudent] New student registered:", newStudent.email);
     res.status(201).json({
-      message: "Student registered successfully; awaiting admin approval.",
+      message: "Student registered successfully.",
       student: newStudent,
     });
   } catch (err) {
@@ -78,7 +118,6 @@ export const controllerSignup = async (req, res) => {
     });
 
     if (existingUser) {
-      console.log("[controllerSignup] Username or email already exists:", normalizedUsername);
       return res.status(400).json({ message: "Username or email already exists" });
     }
 
@@ -94,8 +133,6 @@ export const controllerSignup = async (req, res) => {
       loginMethod: "controller",
       status: "active",
     });
-
-    console.log("[controllerSignup] User created successfully:", user.email);
 
     const token = jwt.sign(
       { id: user._id, userType: user.userType },
@@ -118,8 +155,6 @@ export const controllerLogin = async (req, res) => {
     let { usernameOrEmail, password } = req.body;
     usernameOrEmail = usernameOrEmail?.trim()?.toLowerCase();
 
-    console.log("[controllerLogin] Attempting login with:", usernameOrEmail);
-
     if (!usernameOrEmail || !password) {
       return res.status(400).json({ message: "Missing credentials" });
     }
@@ -132,24 +167,16 @@ export const controllerLogin = async (req, res) => {
     });
 
     if (!user) {
-      console.log("[controllerLogin] No user found for:", usernameOrEmail);
       return res.status(401).json({ message: "User not found" });
     }
 
     if (user.loginMethod !== "controller") {
-      console.log("[controllerLogin] Wrong method login:", user.loginMethod);
       return res.status(401).json({ message: "Use the correct login method" });
-    }
-
-    if (!user.password) {
-      console.log("[controllerLogin] User found, but no password set:", user.email);
-      return res.status(401).json({ message: "No password set for this account." });
     }
 
     const isMatch = await bcrypt.compare(password, user.password);
 
     if (!isMatch) {
-      console.log("[controllerLogin] Invalid password for:", usernameOrEmail);
       return res.status(401).json({ message: "Invalid password" });
     }
 
@@ -159,7 +186,6 @@ export const controllerLogin = async (req, res) => {
       { expiresIn: "7d" }
     );
 
-    console.log("[controllerLogin] Login successful for:", user.username);
     res.json({ user, token });
   } catch (err) {
     console.error("[controllerLogin] Unexpected error:", err);
@@ -168,46 +194,43 @@ export const controllerLogin = async (req, res) => {
 };
 
 // --------------------
-// ADMIN CRUD OPERATIONS
+// ADMIN / USER CRUD OPERATIONS
 // --------------------
 
-// GET ALL USERS (Public - Filtered)
+// GET ALL USERS (Filtered - ONLY Password Hidden)
 export const getUsers = async (req, res) => {
   try {
-    console.log("[getUsers] Fetching all students (public with filters)");
-    const users = await User.find({ userType: "student" }) // ✅ Filter for students only
-      .select('-password -contactNO -trxID -numberUsed -paymentMethod')
-      .sort({ joinedAt: -1 }) // Sort by newest first
+    console.log("[getUsers] Fetching all students");
+    const users = await User.find({ userType: "student" })
+      .select("-password") // ✅ ONLY Password is hidden
+      .sort({ joinedAt: -1 })
       .lean();
 
-    const publicUsers = users.map(user => ({
-      _id: user._id,
-      firstName: user.firstName,
-      lastName: user.lastName,
-      username: user.username,
-      email: user.email,
-      avatar: user.avatar,
-      userType: user.userType,
-      status: user.status,
-      joinedAt: user.joinedAt,
-      courses: user.courses?.map(course => ({
-        course_id: course.course_id,
-        title: course.title,
-      })) || [],
+    // Map to ensure course structure is clean, but keep all other user fields
+    const formattedUsers = users.map((user) => ({
+      ...user, // Include all fields (firstName, contactNO, trxID, etc.)
+      courses:
+        user.courses?.map((course) => ({
+          courseId: course.courseId,
+          title: course.title,
+          plan: course.plan,
+          expiryDate: course.expiryDate,
+        })) || [],
     }));
 
-    console.log(`[getUsers] Returning ${publicUsers.length} students`);
-    res.json(publicUsers);
+    res.json(formattedUsers);
   } catch (err) {
     console.error("[getUsers] Error:", err);
     res.status(500).json({ message: "Server error fetching users" });
   }
 };
 
-// GET SINGLE USER
+// GET SINGLE USER (Filtered - ONLY Password Hidden)
 export const getUser = async (req, res) => {
   try {
-    const user = await User.findById(req.params.id);
+    const user = await User.findById(req.params.id)
+        .select("-password"); // ✅ ONLY Password is hidden
+
     if (!user) return res.status(404).json({ message: "User not found" });
     res.json(user);
   } catch (err) {
@@ -219,7 +242,14 @@ export const getUser = async (req, res) => {
 export const updateUser = async (req, res) => {
   try {
     console.log("[updateUser] Updating user ID:", req.params.id);
-    const user = await User.findByIdAndUpdate(req.params.id, req.body, { new: true });
+    // If updating password, it will be hashed by the model pre-save hook 
+    // BUT findByIdAndUpdate bypasses pre-save hooks unless structured carefully.
+    // If you need to update password here, use findById -> save() pattern instead.
+    // For general fields, this is fine.
+    
+    const user = await User.findByIdAndUpdate(req.params.id, req.body, { new: true })
+        .select("-password");
+        
     if (!user) return res.status(404).json({ message: "User not found" });
     res.json(user);
   } catch (err) {

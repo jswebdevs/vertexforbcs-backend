@@ -17,6 +17,8 @@ const userSchema = new mongoose.Schema({
   // STUDENT-SPECIFIC FIELDS
   // -------------------------------
   contactNO: { type: String, trim: true },
+  
+  // Payment info for the *latest* transaction (optional, for history use a separate Transaction model)
   paymentMethod: {
     type: String,
     enum: ["Cash", "bKash", "Rocket", "Credit Card", "Nagad", "Others"],
@@ -24,17 +26,34 @@ const userSchema = new mongoose.Schema({
   trxID: { type: String, trim: true },
   numberUsed: { type: String, trim: true },
 
-  // Unified list of enrolled courses (covers both assigned and registered)
+  // -------------------------------
+  // PER-COURSE SUBSCRIPTIONS (Modified)
+  // -------------------------------
+  // This replaces the old 'activeSubscription' and simple 'courses' list.
+  // Each object here represents a specific access right to a specific course.
   courses: [
     {
-      course_id: { type: mongoose.Schema.Types.ObjectId, ref: "Course" },
-      title: { type: String },
+      courseId: { type: mongoose.Schema.Types.ObjectId, ref: "Course", required: true },
+      title: { type: String }, // Optional snapshot of title
+      
+      // Which plan did they buy for THIS specific course?
+      plan: { 
+        type: String, 
+        enum: ["1M", "2M", "3M", "6M", "Lifetime"],
+        required: true 
+      }, 
+      
+      // When does access to THIS course start and end?
+      startDate: { type: Date, default: Date.now },
+      expiryDate: { type: Date, required: true }, 
+      
+      isActive: { type: Boolean, default: true }
     },
   ],
 
   status: {
     type: String,
-    enum: ["active", "hold", "suspended"],
+    enum: ["active", "hold", "suspended", "banned"],
     default: "hold",
   },
 
@@ -48,22 +67,15 @@ const userSchema = new mongoose.Schema({
   },
   joinedAt: { type: Date, default: Date.now },
 
-  // Optional subscription system (if any)
-  activeSubscription: {
-    plan: { type: String, enum: ["1M", "2M", "3M", "6M"] },
-    startDate: Date,
-    expiryDate: Date,
-    isActive: { type: Boolean, default: false },
-  },
-
+  // REMOVED: activeSubscription (Global subscription is no longer needed)
+  
   quizzesAttended: [{ type: mongoose.Schema.Types.ObjectId, ref: "Quiz" }],
   avatar: { type: String },
   lastLogin: { type: Date },
 
-  // Login method (only controller-based login allowed)
   loginMethod: {
     type: String,
-    enum: ["controller"], // Only support controller login
+    enum: ["controller"], 
     default: "controller",
   },
 });
@@ -87,6 +99,22 @@ userSchema.pre("save", async function (next) {
 // -------------------------------
 userSchema.methods.matchPassword = async function (enteredPassword) {
   return await bcrypt.compare(enteredPassword, this.password);
+};
+
+// -------------------------------
+// HELPER METHOD: CHECK COURSE ACCESS
+// -------------------------------
+// Use this in your controllers/middleware to check if a user can view a course
+userSchema.methods.hasActiveCourse = function (courseIdToCheck) {
+  const course = this.courses.find(
+    (c) => c.courseId.toString() === courseIdToCheck.toString()
+  );
+
+  if (!course) return false; // Not enrolled
+
+  // Check if today is before the expiry date
+  const now = new Date();
+  return course.isActive && course.expiryDate > now;
 };
 
 // -------------------------------

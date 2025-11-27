@@ -89,10 +89,8 @@ app.use("/api/questions", questionsRoutes);
 const startServer = async () => {
   try {
     await connectDB(); // Mongoose connection
-    console.log("✅ Database connected successfully");
-
     app.listen(port, () => {
-      console.log(`🚀 Server running on port ${port}`);
+      console.log(`🚀 Server running on port ${port}. Start Coding Now`);
     });
   } catch (err) {
     console.error("❌ Failed to start server:", err);
