@@ -21,7 +21,7 @@ const userSchema = new mongoose.Schema({
   // Payment info for the *latest* transaction (optional, for history use a separate Transaction model)
   paymentMethod: {
     type: String,
-    enum: ["Cash", "bKash", "Rocket", "Credit Card", "Nagad", "Others"],
+    enum: ["Cash", "bKash", "Rocket", "Credit Card", "Nagad", "Others", "Mobile Banking"],
   },
   trxID: { type: String, trim: true },
   numberUsed: { type: String, trim: true },

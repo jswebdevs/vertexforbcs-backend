@@ -14,6 +14,8 @@ import mediaRoutes from "./routes/media.routes.js";
 import quizRoutes from "./routes/quizzes.routes.js";
 import courseQuizRoutes from "./routes/courseQuiz.routes.js";
 import questionsRoutes from "./routes/questions.routes.js";
+import enrollmentRoutes from "./routes/enrollment.routes.js";
+
 
 // ESM __dirname fix
 const __filename = fileURLToPath(import.meta.url);
@@ -82,6 +84,7 @@ app.use("/api/courses", courseQuizRoutes);
 app.use("/api/media", mediaRoutes);
 app.use("/api/quizzes", quizRoutes);
 app.use("/api/questions", questionsRoutes);
+app.use("/api/enrollments", enrollmentRoutes);
 
 // -------------------------------
 // START SERVER

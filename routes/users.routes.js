@@ -12,6 +12,7 @@ import {
   updateUser,
   deleteUser,
   checkUsernameOrEmail,
+  newEnrollRequest
 } from "../controllers/users.controller.js";
 import {
   verifyToken,
@@ -71,6 +72,13 @@ router.post("/signup", registerLimiter, async (req, res) => {
 router.post("/login", loginLimiter, async (req, res) => {
   console.log("[users.routes] POST /login");
   await controllerLogin(req, res);
+});
+
+//New Enrollment
+
+router.post("/newenrollrequest/:id", verifyToken, async (req, res) => {
+    console.log("[users.routes] POST /newenrollrequest/:id");
+    await newEnrollRequest(req, res);
 });
 
 // 5. Get All Users (Public)

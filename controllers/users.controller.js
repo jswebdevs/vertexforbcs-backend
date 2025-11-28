@@ -295,3 +295,99 @@ export const checkUsernameOrEmail = async (req, res) => {
     res.status(500).json({ available: false, message: "Server error" });
   }
 };
+
+export const newEnrollRequest = async (req, res) => {
+  const studentId = req.params.id;
+  const { 
+    courseId, 
+    courseTitle, 
+    plan, 
+    trxID, 
+    numberUsed, 
+    amount, 
+    paymentMethod, 
+    requestDate,
+  } = req.body;
+
+  try {
+    if (!studentId || !courseId || !trxID || !plan) {
+      return res.status(400).json({ message: "Missing required fields for enrollment request." });
+    }
+
+    // 1. Find the student
+    const student = await User.findById(studentId);
+    if (!student) {
+      return res.status(404).json({ message: "Student not found." });
+    }
+    
+    // 2. Check if the student is already enrolled in this course
+    const isEnrolled = student.courses.some(c => c.courseId.toString() === courseId);
+    if (isEnrolled) {
+        return res.status(400).json({ message: `Already enrolled in ${courseTitle}.` });
+    }
+
+    // 3. Update the student's general payment fields (This is the "Request" part)
+    // IMPORTANT: Actual enrollment/course push should happen AFTER admin verification.
+    // For now, we update the latest payment attempt and set status to 'hold' 
+    // or log the request somewhere else (e.g., a separate 'EnrollmentRequest' model).
+
+    // --- Using a simplified update for demo purposes: ---
+    await User.findByIdAndUpdate(studentId, {
+      paymentMethod: paymentMethod || "Mobile Banking",
+      trxID: trxID,
+      numberUsed: numberUsed,
+      // Optional: Change status to 'hold' while payment verification is pending
+      // status: 'hold', 
+    });
+
+    // 4. Return success message and data for the admin queue
+    return res.status(200).json({
+      message: "Enrollment request submitted successfully. Awaiting admin payment verification.",
+      enrollmentRequest: {
+        studentId,
+        courseId,
+        courseTitle,
+        plan,
+        trxID,
+        numberUsed,
+        amount,
+        requestDate,
+        status: 'PENDING_VERIFICATION'
+      }
+    });
+
+  } catch (err) {
+    console.error("[newEnrollRequest] Error:", err);
+    res.status(500).json({ message: "Server error during enrollment request." });
+  }
+};
+
+// Add this to backend/controllers/users.controller.js
+// NOTE: This assumes you have a separate EnrollmentRequest model or mechanism 
+// to look up the request data, as it's not directly in the User model.
+
+export const getEnrollmentRequest = async (req, res) => {
+  const requestId = req.params.id;
+
+  try {
+    // ⚠️ REPLACE THIS: Query your specific EnrollmentRequest model or log/queue table here
+    // Example placeholder:
+    const mockRequest = { 
+        id: requestId, 
+        status: "PENDING_VERIFICATION", 
+        courseTitle: "Bangla", 
+        trxID: "9H7D...", 
+        paymentStatus: "Awaiting Admin Review" 
+    };
+
+    if (!mockRequest) {
+      return res.status(404).json({ message: "Enrollment request not found." });
+    }
+
+    return res.status(200).json(mockRequest);
+    
+  } catch (err) {
+    console.error("[getEnrollmentRequest] Error:", err);
+    res.status(500).json({ message: "Server error fetching request." });
+  }
+};
