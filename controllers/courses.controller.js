@@ -1,37 +1,52 @@
-// backend/controllers/courses.controller.js
-
 import Course from "../models/courses.model.js";
+import Media from "../models/media.model.js"; // ✅ Import Media to create docs on upload
+
+// --- HELPER: Handle File Upload & Create Media Document ---
+// If a file is uploaded via Multer, we must save it to the Media collection 
+// first to get an _id, because the Course model now expects ObjectIds.
+const processFileUpload = async (file, folder = "courses") => {
+  if (!file) return null;
+  
+  // Create URL based on your static serve setup
+  const url = `/uploads/${file.filename}`;
+  const thumbUrl = `/uploads/${file.filename}`; // Or generate real thumb if needed
+
+  const newMedia = await Media.create({
+    filename: file.filename,
+    originalName: file.originalname,
+    mimeType: file.mimetype,
+    size: file.size,
+    folder: folder,
+    uploadDate: new Date(),
+    url: url,
+    thumbUrl: thumbUrl,
+  });
+
+  return newMedia._id; // Return the ObjectId
+};
+
 
 // --------------------------------------------------
-// CREATE NEW COURSE  (Admin only, with multer)
+// CREATE NEW COURSE
 // --------------------------------------------------
 export const createCourse = async (req, res) => {
-
-  console.log("[DEBUG] req.body:", req.body);
-
-  if (req.files) console.log("POST FILES:", req.files);
-
   try {
     const {
-      title,
-      description,
-      category,
-      subCategory,
-      level,
-      tags,
-      language,
-      startDate,
-      endDate,
-      duration,
-      videoPreview,
-      status,
+      title, description, category, subCategory, level, tags, language,
+      startDate, endDate, duration, status,
       "subscription.amount": subscriptionAmount,
       "subscription.billingCycle": billingCycle,
       "subscription.currency": currency,
       "subscription.trialPeriodDays": trialPeriodDays,
       "subscription.active": subscriptionActive,
+      
+      // IDs from frontend Media Library selection
+      courseImageId, 
+      videoPreviewId,
+      imageGalleryIds 
     } = req.body;
 
+    // 1. Handle Tags
     let tagsArr = [];
     if (tags) {
       try {
@@ -41,6 +56,7 @@ export const createCourse = async (req, res) => {
       }
     }
 
+    // 2. Handle Syllabus
     let syllabusArr = [];
     if (req.body.syllabus) {
       try {
@@ -50,16 +66,41 @@ export const createCourse = async (req, res) => {
       }
     }
 
-    let courseImage = "";
+    // 3. Handle Media (Priority: New File Upload > Library ID)
+    
+    // A. Course Image
+    let courseImage = null;
     if (req.files && req.files["courseImage"] && req.files["courseImage"][0]) {
-      courseImage = req.files["courseImage"][0].filename;
+      // Create Media doc for new file
+      courseImage = await processFileUpload(req.files["courseImage"][0]);
+    } else if (courseImageId) {
+      // Use existing ID
+      courseImage = courseImageId; 
     }
 
+    // B. Video Preview
+    let videoPreview = null;
+    if (req.files && req.files["videoPreview"] && req.files["videoPreview"][0]) {
+       videoPreview = await processFileUpload(req.files["videoPreview"][0]);
+    } else if (videoPreviewId) {
+       videoPreview = videoPreviewId;
+    }
+
+    // C. Image Gallery
     let imageGallery = [];
+    // Add existing library IDs
+    if (imageGalleryIds) {
+        const ids = Array.isArray(imageGalleryIds) ? imageGalleryIds : [imageGalleryIds];
+        imageGallery = [...imageGallery, ...ids];
+    }
+    // Add new file uploads
     if (req.files && req.files["imageGallery"] && Array.isArray(req.files["imageGallery"])) {
-      imageGallery = req.files["imageGallery"].map((f) => f.filename);
+      const uploadPromises = req.files["imageGallery"].map(file => processFileUpload(file));
+      const newIds = await Promise.all(uploadPromises);
+      imageGallery = [...imageGallery, ...newIds];
     }
 
+    // 4. Subscription
     const subscription = {
       amount: parseFloat(subscriptionAmount),
       billingCycle: billingCycle || "monthly",
@@ -69,94 +110,92 @@ export const createCourse = async (req, res) => {
     };
 
     const courseData = {
-      title,
-      description,
-      category,
-      subCategory,
-      level,
+      title, description, category, subCategory, level, language,
+      startDate, endDate, duration,
       tags: tagsArr,
-      language,
-      startDate,
-      endDate,
-      duration,
-      courseImage,
-      imageGallery,
-      videoPreview,
+      courseImage, 
+      imageGallery, 
+      videoPreview, 
       syllabus: syllabusArr,
       subscription,
       status: status || "draft",
     };
 
-    // Validation: Required fields
     if (!title || !subscription.amount) {
       return res.status(400).json({ message: "Title and subscription.amount are required" });
     }
 
-    // Create and save the course
     const savedCourse = await new Course(courseData).save();
-    if (!savedCourse || !savedCourse._id) {
-      console.error("[courses.controller] ERROR: Save returned null/invalid", savedCourse);
-      return res.status(500).json({ message: "Failed to save course" });
-    }
-
-    console.log("[courses.controller] New course created:", savedCourse.title, savedCourse._id);
+    
     res.status(201).json({
       message: "Course created successfully",
       course: savedCourse,
     });
 
   } catch (error) {
-    console.error("[courses.controller] Error creating course:", error);
+    console.error("[courses.controller] Create Error:", error);
     res.status(500).json({ message: "Server error creating course" });
   }
 };
 
 
 // --------------------------------------------------
-// GET ALL COURSES  (Public / Student)
-// --------------------------------------------------
-export const getAllCourses = async (req, res) => {
-  try {
-    const courses = await Course.find().sort({
-      createdAt: -1,
-    });
-    res.status(200).json(courses);
-  } catch (error) {
-    console.error("[courses.controller] Error fetching courses:", error);
-    res.status(500).json({ message: "Server error fetching courses" });
-  }
-};
-
-// --------------------------------------------------
-// GET SINGLE COURSE BY ID
-// --------------------------------------------------
-export const getCourseById = async (req, res) => {
-  try {
-    const course = await Course.findById(req.params.id);
-    if (!course) return res.status(404).json({ message: "Course not found" });
-    res.status(200).json(course);
-  } catch (error) {
-    console.error("[courses.controller] Error fetching course:", error);
-    res.status(500).json({ message: "Server error fetching course" });
-  }
-};
-
-// --------------------------------------------------
-// UPDATE COURSE  (Admin only)
+// UPDATE COURSE
 // --------------------------------------------------
 export const updateCourse = async (req, res) => {
   try {
     const { id } = req.params;
-    const updatedFields = { ...req.body };
+    
+    // Destructure media IDs from body, keep rest
+    const { 
+        courseImageId, 
+        videoPreviewId, 
+        imageGalleryIds,
+        ...otherFields 
+    } = req.body;
 
-    // Handle updated files (multer)
+    const updatedFields = { ...otherFields };
+
+    // --- Media Update Logic ---
+
+    // 1. Course Image
     if (req.files && req.files["courseImage"] && req.files["courseImage"][0]) {
-      updatedFields.courseImage = req.files["courseImage"][0].filename;
+      updatedFields.courseImage = await processFileUpload(req.files["courseImage"][0]);
+    } else if (courseImageId !== undefined) {
+      // If sent (even empty string), update it. 
+      // If empty string -> null (removes image). If ID -> ID.
+      updatedFields.courseImage = courseImageId || null; 
     }
+
+    // 2. Video Preview
+    if (req.files && req.files["videoPreview"] && req.files["videoPreview"][0]) {
+      updatedFields.videoPreview = await processFileUpload(req.files["videoPreview"][0]);
+    } else if (videoPreviewId !== undefined) {
+      updatedFields.videoPreview = videoPreviewId || null;
+    }
+
+    // 3. Gallery
+    let newGallery = [];
+    // Existing IDs from library
+    if (imageGalleryIds) {
+        const ids = Array.isArray(imageGalleryIds) ? imageGalleryIds : [imageGalleryIds];
+        // Filter out '[]' string edge case
+        newGallery = ids.filter(id => id && id !== '[]');
+        if(imageGalleryIds === '[]') newGallery = [];
+    }
+    // New Uploads
     if (req.files && req.files["imageGallery"] && Array.isArray(req.files["imageGallery"])) {
-      updatedFields.imageGallery = req.files["imageGallery"].map((f) => f.filename);
+       const uploadPromises = req.files["imageGallery"].map(f => processFileUpload(f));
+       const newIds = await Promise.all(uploadPromises);
+       newGallery = [...newGallery, ...newIds];
     }
-    // Parse JSON fields if present
+
+    // Only update gallery if inputs were provided
+    if (imageGalleryIds !== undefined || (req.files && req.files["imageGallery"])) {
+        updatedFields.imageGallery = newGallery;
+    }
+
+    // --- Parsing Complex Fields ---
     if (updatedFields.tags) {
       try {
         updatedFields.tags = JSON.parse(updatedFields.tags);
@@ -171,39 +210,89 @@ export const updateCourse = async (req, res) => {
         updatedFields.syllabus = [];
       }
     }
+    
+    // --- Nested Subscription ---
+    if (req.body["subscription.amount"]) {
+        updatedFields.subscription = {
+            amount: req.body["subscription.amount"],
+            billingCycle: req.body["subscription.billingCycle"],
+            currency: req.body["subscription.currency"],
+            active: true 
+        };
+        // Cleanup flat keys
+        delete updatedFields["subscription.amount"];
+        delete updatedFields["subscription.billingCycle"];
+        delete updatedFields["subscription.currency"];
+    }
 
-    const updatedCourse = await Course.findByIdAndUpdate(id, { $set: updatedFields }, { new: true });
+    // Update and Populate result immediately
+    const updatedCourse = await Course.findByIdAndUpdate(id, { $set: updatedFields }, { new: true })
+        .populate("courseImage")
+        .populate("videoPreview")
+        .populate("imageGallery");
+    
     if (!updatedCourse) {
       return res.status(404).json({ message: "Course not found" });
     }
 
-    console.log("[courses.controller] Course updated:", updatedCourse.title);
     res.status(200).json({ message: "Course updated successfully", course: updatedCourse });
   } catch (error) {
-    console.error("[courses.controller] Error updating course:", error);
+    console.error("[courses.controller] Update Error:", error);
     res.status(500).json({ message: "Server error updating course" });
   }
 };
 
+
 // --------------------------------------------------
-// DELETE COURSE  (Admin only)
+// GET SINGLE COURSE BY ID (Populated)
+// --------------------------------------------------
+export const getCourseById = async (req, res) => {
+  try {
+    const course = await Course.findById(req.params.id)
+      .populate("courseImage")   // ✅ Populate to get full object (url, etc)
+      .populate("imageGallery")  // ✅ Populate array
+      .populate("videoPreview"); // ✅ Populate video
+
+    if (!course) return res.status(404).json({ message: "Course not found" });
+    res.status(200).json(course);
+  } catch (error) {
+    console.error("[courses.controller] Error fetching course:", error);
+    res.status(500).json({ message: "Server error fetching course" });
+  }
+};
+
+
+// --------------------------------------------------
+// GET ALL COURSES
+// --------------------------------------------------
+export const getAllCourses = async (req, res) => {
+  try {
+    const courses = await Course.find()
+      .populate("courseImage") // Optional: Populate to show thumbnails in list
+      .sort({ createdAt: -1 });
+      
+    res.status(200).json(courses);
+  } catch (error) {
+    console.error("[courses.controller] Error fetching courses:", error);
+    res.status(500).json({ message: "Server error fetching courses" });
+  }
+};
+
+// --------------------------------------------------
+// OTHER CONTROLLERS (Unchanged)
 // --------------------------------------------------
 export const deleteCourse = async (req, res) => {
   try {
     const { id } = req.params;
     const deletedCourse = await Course.findByIdAndDelete(id);
     if (!deletedCourse) return res.status(404).json({ message: "Course not found" });
-    console.log("[courses.controller] Course deleted:", deletedCourse.title);
     res.status(200).json({ message: "Course deleted successfully" });
   } catch (error) {
-    console.error("[courses.controller] Error deleting course:", error);
+    console.error("Error deleting course:", error);
     res.status(500).json({ message: "Server error deleting course" });
   }
 };
 
-// --------------------------------------------------
-// ENROLL STUDENT  (Student route)
-// --------------------------------------------------
 export const enrollStudent = async (req, res) => {
   try {
     const { courseId } = req.params;
@@ -221,17 +310,13 @@ export const enrollStudent = async (req, res) => {
     course.enrolledStudents.push(enrollment);
     await course.save();
 
-    console.log(`[courses.controller] Student enrolled: ${studentId}`);
     res.status(200).json({ message: "Student enrolled successfully", course });
   } catch (error) {
-    console.error("[courses.controller] Error enrolling student:", error);
+    console.error("Error enrolling student:", error);
     res.status(500).json({ message: "Server error enrolling student" });
   }
 };
 
-// --------------------------------------------------
-// GET ENROLLED STUDENTS  (Admin only)
-// --------------------------------------------------
 export const getEnrolledStudents = async (req, res) => {
   try {
     const { id } = req.params;
@@ -243,7 +328,7 @@ export const getEnrolledStudents = async (req, res) => {
 
     res.status(200).json(course.enrolledStudents);
   } catch (error) {
-    console.error("[courses.controller] Error fetching enrolled students:", error);
+    console.error("Error fetching enrolled students:", error);
     res.status(500).json({ message: "Server error fetching enrolled students" });
   }
 };

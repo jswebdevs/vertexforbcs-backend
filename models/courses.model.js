@@ -31,9 +31,20 @@ const courseSchema = new mongoose.Schema(
     startDate: Date,
     endDate: Date,
     duration: String,
-    courseImage: String,
-    imageGallery: [String],
-    videoPreview: String,
+
+    // ✅ CHANGED: Reference the Media model instead of storing raw strings
+    courseImage: { 
+      type: mongoose.Schema.Types.ObjectId, 
+      ref: "Media" 
+    },
+    imageGallery: [{ 
+      type: mongoose.Schema.Types.ObjectId, 
+      ref: "Media" 
+    }],
+    videoPreview: { 
+      type: mongoose.Schema.Types.ObjectId, 
+      ref: "Media" 
+    },
 
     syllabus: [syllabusSchema],
 
