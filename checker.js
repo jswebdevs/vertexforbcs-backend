@@ -1,22 +1,76 @@
-// Run this in a Node.js script or REPL connected to your DB
-const { getDB } = require("./config/db"); // adjust path
-const fs = require("fs");
-const path = require("path");
+// backend/cleanup_orphans.js
 
-async function cleanupMedia() {
-  const mediaCollection = getDB().collection("media");
-  const media = await mediaCollection.find({}).toArray();
+import mongoose from 'mongoose';
+// 🛑 ADD THIS LINE TO LOAD .env FILE
+import 'dotenv/config'; 
 
-  for (const m of media) {
-    const filePath = path.join(__dirname, "uploads", m.folder, m.filename);
-    if (!fs.existsSync(filePath)) {
-      console.log("Deleting orphaned record:", m.filename);
-      await mediaCollection.deleteOne({ _id: m._id });
+// You will need to replace the paths below with your actual paths
+import Course from './models/courses.model.js'; 
+import Quiz from './models/quizzes.model.js';
+
+// WARNING: MONGO_URI is now loaded from your .env file
+const MONGO_URI = process.env.MONGO_URI; 
+
+async function deleteOrphanedQuizzes() {
+    console.log("--- Starting Orphaned Quiz Cleanup Script ---");
+    
+    // Check if URI is available for debugging
+    if (!MONGO_URI) {
+        console.error("❌ CRITICAL ERROR: MONGO_URI is not defined. Check your .env file and path.");
+        await mongoose.disconnect();
+        return;
     }
-  }
 
-  console.log("Cleanup done!");
-  process.exit();
+    try {
+        await mongoose.connect(MONGO_URI);
+        console.log("Database connection established.");
+
+        // Step 1: Use aggregation to identify orphaned quizzes
+        const orphanedQuizzes = await Quiz.aggregate([
+            {
+                $lookup: {
+                    from: Course.collection.name, // 'courses' collection name
+                    localField: "courseID",      // The field in the Quiz model pointing to the Course ID
+                    foreignField: "_id",         // The primary key in the Course model
+                    as: "courseCheck",           
+                },
+            },
+            {
+                $match: {
+                    courseCheck: { $eq: [] },
+                },
+            },
+            {
+                $project: {
+                    _id: 1,
+                    quizTitle: 1,
+                    orphanedCourseId: "$courseID",
+                },
+            },
+        ]);
+
+        const orphanedIds = orphanedQuizzes.map(q => q._id);
+
+        if (orphanedIds.length > 0) {
+            console.log(`\n🔍 Found ${orphanedIds.length} orphaned quizzes ready for deletion.`);
+            orphanedQuizzes.forEach(q => {
+                console.log(` - Deleting: ${q.quizTitle} (Orphan ID: ${q.orphanedCourseId})`);
+            });
+
+            // Step 2: Delete the identified documents
+            const result = await Quiz.deleteMany({ _id: { $in: orphanedIds } });
+            
+            console.log(`\n✅ Cleanup Complete: Successfully deleted ${result.deletedCount} orphaned quizzes.`);
+        } else {
+            console.log('✅ No orphaned quizzes found. Database is clean.');
+        }
+
+    } catch (error) {
+        console.error('\n❌ CRITICAL ERROR DURING CLEANUP:', error);
+    } finally {
+        await mongoose.disconnect();
+        console.log("Database connection closed.");
+    }
 }
 
-cleanupMedia();
+deleteOrphanedQuizzes();

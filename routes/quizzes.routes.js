@@ -7,6 +7,7 @@ import {
   getQuizById,
   updateQuiz,
   deleteQuiz,
+  getQuizLeaderboard
 } from "../controllers/quizzes.controller.js";
 
 import { verifyToken, adminOnly } from "../middlewares/auth.middleware.js";
@@ -51,5 +52,8 @@ router.delete("/:id", verifyToken, adminOnly, async (req, res) => {
   console.log("[quiz.routes] DELETE /:id - Delete quiz:", req.params.id);
   await deleteQuiz(req, res);
 });
+
+// Public or Student Protected route to view scores
+router.get("/leaderboard/:id", getQuizLeaderboard);
 
 export default router;

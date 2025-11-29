@@ -1,5 +1,3 @@
-// backend/routes/users.routes.js
-
 import express from "express";
 import rateLimit from "express-rate-limit";
 import User from "../models/users.model.js"; 
@@ -12,7 +10,8 @@ import {
   updateUser,
   deleteUser,
   checkUsernameOrEmail,
-  newEnrollRequest
+  newEnrollRequest,
+  saveQuizResult, // ✅ Imported new controller
 } from "../controllers/users.controller.js";
 import {
   verifyToken,
@@ -74,38 +73,28 @@ router.post("/login", loginLimiter, async (req, res) => {
   await controllerLogin(req, res);
 });
 
-//New Enrollment
-
+// 5. Legacy Enrollment Request (If still used alongside enrollment.routes.js)
 router.post("/newenrollrequest/:id", verifyToken, async (req, res) => {
     console.log("[users.routes] POST /newenrollrequest/:id");
     await newEnrollRequest(req, res);
 });
 
-// 5. Get All Users (Public)
+// 6. Get All Users
 router.get("/", getUsersLimiter, async (req, res) => {
   console.log("[users.routes] GET / (Public) - Fetch all users");
   await getUsers(req, res);
 });
 
-// 6. Get Single User (Public - Accessible by ID)
-// ✅ NOTE: Removed verifyToken and req.user checks to make this public.
-// The controller filters out the password.
-router.get("/:id", async (req, res) => {
-  console.log("[users.routes] GET /:id (Public Access) -", req.params.id);
-  await getUser(req, res);
-});
 
 // --------------------------------------------------
-// STUDENT-PROTECTED ROUTES (Token Required)
+// STUDENT & QUIZ ROUTES
 // --------------------------------------------------
 
-// Student accesses their own profile via Token
+// 7. Get Student Profile
 router.get("/me", verifyToken, studentOnly, async (req, res) => {
   console.log("[users.routes] GET /me (Student self profile)");
   try {
-    // req.user.id comes from the decoded JWT
     const student = await User.findById(req.user.id).select("-password"); 
-    
     if (!student) {
         return res.status(404).json({ message: "Student not found" });
     }
@@ -116,17 +105,31 @@ router.get("/me", verifyToken, studentOnly, async (req, res) => {
   }
 });
 
+// 8. ✅ SAVE QUIZ RESULT (New Route)
+// Maps to: https://backend.vertexforbcs.org//api/users/:studentId/:quizId
+router.post("/:studentId/:quizId", verifyToken, async (req, res) => {
+    console.log(`[users.routes] POST Quiz Result for Student: ${req.params.studentId}`);
+    await saveQuizResult(req, res);
+});
+
+
 // --------------------------------------------------
-// ADMIN PROTECTED ROUTES (Token + Admin Check)
+// GENERAL USER ROUTES (Must come last to avoid conflicting with specific paths)
 // --------------------------------------------------
 
-// Update User (Admin Only)
+// 9. Get Single User (Public Access by ID)
+router.get("/:id", async (req, res) => {
+  console.log("[users.routes] GET /:id (Public Access) -", req.params.id);
+  await getUser(req, res);
+});
+
+// 10. Update User (Admin Only)
 router.put("/:id", verifyToken, adminOnly, async (req, res) => {
   console.log("[users.routes] PUT /:id (Admin) -", req.params.id);
   await updateUser(req, res);
 });
 
-// Delete User (Admin Only)
+// 11. Delete User (Admin Only)
 router.delete("/:id", verifyToken, adminOnly, async (req, res) => {
   console.log("[users.routes] DELETE /:id (Admin) -", req.params.id);
   await deleteUser(req, res);

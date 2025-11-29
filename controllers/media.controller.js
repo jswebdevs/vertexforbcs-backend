@@ -50,7 +50,7 @@ export async function addMedia(req, res) {
     const files = req.files;
     if (!files || files.length === 0) return res.status(400).json({ error: "No files uploaded" });
 
-    const baseUrl = "http://localhost:5000"; // adjust as needed
+    const baseUrl = "https://backend.vertexforbcs.org/"; // adjust as needed
     const mediaDocs = [];
 
     await Promise.all(

@@ -1,6 +1,7 @@
 // backend/controllers/users.controller.js
 
 import User from "../models/users.model.js";
+import Quiz from "../models/quizzes.model.js"; // ✅ Imported Quiz to fetch titles
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 
@@ -21,7 +22,7 @@ const calculateExpiryDate = (plan) => {
     case "Lifetime":
       return new Date(now.setFullYear(now.getFullYear() + 100));
     default:
-      return new Date(now.setDate(now.getDate() + 30)); // Default 1 month
+      return new Date(now.setDate(now.getDate() + 30));
   }
 };
 
@@ -31,15 +32,7 @@ const calculateExpiryDate = (plan) => {
 export const registerStudent = async (req, res) => {
   try {
     const {
-      firstName,
-      lastName,
-      email,
-      password,
-      contactNO,
-      paymentMethod,
-      trxID,
-      numberUsed,
-      courses, // Array of { courseId, plan } coming from frontend
+      firstName, lastName, email, password, contactNO, paymentMethod, trxID, numberUsed, courses,
     } = req.body;
 
     if (!email || !firstName || !lastName || !password) {
@@ -47,47 +40,34 @@ export const registerStudent = async (req, res) => {
     }
 
     const normalizedEmail = email.trim().toLowerCase();
-
     const existingStudent = await User.findOne({ email: normalizedEmail });
     if (existingStudent) {
       return res.status(400).json({ message: "Student already registered" });
     }
 
-    // -------------------------------------------------
-    // Process Courses & Calculate Expiry
-    // -------------------------------------------------
     let processedCourses = [];
     if (courses && Array.isArray(courses)) {
       processedCourses = courses.map((c) => {
-        // Ensure we have a plan, default to 1M if missing
         const plan = c.plan || "1M";
         return {
-          courseId: c.courseId, // Matches new Model
-          title: c.title || "", // Optional
+          courseId: c.courseId,
+          title: c.title || "",
           plan: plan,
           startDate: new Date(),
-          expiryDate: calculateExpiryDate(plan), // CALCULATE EXPIRY HERE
+          expiryDate: calculateExpiryDate(plan),
           isActive: true,
         };
       });
     }
 
     const newStudent = await User.create({
-      firstName,
-      lastName,
-      email: normalizedEmail,
-      password,
-      contactNO,
-      paymentMethod,
-      trxID,
-      numberUsed,
-      courses: processedCourses, // Save the processed array
+      firstName, lastName, email: normalizedEmail, password, contactNO, paymentMethod, trxID, numberUsed,
+      courses: processedCourses,
       userType: "student",
-      status: "active", // Or "hold" if you verify payments manually
+      status: "active",
       loginMethod: "controller",
     });
 
-    console.log("[registerStudent] New student registered:", newStudent.email);
     res.status(201).json({
       message: "Student registered successfully.",
       student: newStudent,
@@ -99,11 +79,10 @@ export const registerStudent = async (req, res) => {
 };
 
 // --------------------
-// SIGNUP CONTROLLER (ADMIN/STUDENT ACCOUNT)
+// SIGNUP CONTROLLER
 // --------------------
 export const controllerSignup = async (req, res) => {
   const { username, password, email, firstName, lastName, userType = "student" } = req.body;
-  console.log("[controllerSignup] Incoming request:", req.body);
 
   if (!username || !password) {
     return res.status(400).json({ message: "Username and password required" });
@@ -194,28 +173,24 @@ export const controllerLogin = async (req, res) => {
 };
 
 // --------------------
-// ADMIN / USER CRUD OPERATIONS
+// CRUD OPERATIONS
 // --------------------
 
-// GET ALL USERS (Filtered - ONLY Password Hidden)
 export const getUsers = async (req, res) => {
   try {
-    console.log("[getUsers] Fetching all students");
     const users = await User.find({ userType: "student" })
-      .select("-password") // ✅ ONLY Password is hidden
+      .select("-password")
       .sort({ joinedAt: -1 })
       .lean();
 
-    // Map to ensure course structure is clean, but keep all other user fields
     const formattedUsers = users.map((user) => ({
-      ...user, // Include all fields (firstName, contactNO, trxID, etc.)
-      courses:
-        user.courses?.map((course) => ({
-          courseId: course.courseId,
-          title: course.title,
-          plan: course.plan,
-          expiryDate: course.expiryDate,
-        })) || [],
+      ...user,
+      courses: user.courses?.map((course) => ({
+        courseId: course.courseId,
+        title: course.title,
+        plan: course.plan,
+        expiryDate: course.expiryDate,
+      })) || [],
     }));
 
     res.json(formattedUsers);
@@ -225,12 +200,9 @@ export const getUsers = async (req, res) => {
   }
 };
 
-// GET SINGLE USER (Filtered - ONLY Password Hidden)
 export const getUser = async (req, res) => {
   try {
-    const user = await User.findById(req.params.id)
-        .select("-password"); // ✅ ONLY Password is hidden
-
+    const user = await User.findById(req.params.id).select("-password");
     if (!user) return res.status(404).json({ message: "User not found" });
     res.json(user);
   } catch (err) {
@@ -241,15 +213,7 @@ export const getUser = async (req, res) => {
 
 export const updateUser = async (req, res) => {
   try {
-    console.log("[updateUser] Updating user ID:", req.params.id);
-    // If updating password, it will be hashed by the model pre-save hook 
-    // BUT findByIdAndUpdate bypasses pre-save hooks unless structured carefully.
-    // If you need to update password here, use findById -> save() pattern instead.
-    // For general fields, this is fine.
-    
-    const user = await User.findByIdAndUpdate(req.params.id, req.body, { new: true })
-        .select("-password");
-        
+    const user = await User.findByIdAndUpdate(req.params.id, req.body, { new: true }).select("-password");
     if (!user) return res.status(404).json({ message: "User not found" });
     res.json(user);
   } catch (err) {
@@ -260,7 +224,6 @@ export const updateUser = async (req, res) => {
 
 export const deleteUser = async (req, res) => {
   try {
-    console.log("[deleteUser] Deleting user ID:", req.params.id);
     const user = await User.findByIdAndDelete(req.params.id);
     if (!user) return res.status(404).json({ message: "User not found" });
     res.json({ message: "User deleted successfully" });
@@ -270,7 +233,6 @@ export const deleteUser = async (req, res) => {
   }
 };
 
-// CHECK USERNAME OR EMAIL AVAILABILITY
 export const checkUsernameOrEmail = async (req, res) => {
   try {
     const { value } = req.params;
@@ -280,114 +242,104 @@ export const checkUsernameOrEmail = async (req, res) => {
     });
 
     if (existing) {
-      return res.json({
-        available: false,
-        message: "Username or email is already registered",
-      });
+      return res.json({ available: false, message: "Username or email is already registered" });
     }
-
-    res.json({
-      available: true,
-      message: "Available",
-    });
+    res.json({ available: true, message: "Available" });
   } catch (err) {
     console.error("[checkUsernameOrEmail] Error:", err);
     res.status(500).json({ available: false, message: "Server error" });
   }
 };
 
+// --------------------
+// LEGACY / UTILITY ROUTES (If still used by frontend)
+// --------------------
+
 export const newEnrollRequest = async (req, res) => {
+  // This logic is now largely handled by enrollment.controller.js, 
+  // but kept here if legacy routes still point to it.
   const studentId = req.params.id;
-  const { 
-    courseId, 
-    courseTitle, 
-    plan, 
-    trxID, 
-    numberUsed, 
-    amount, 
-    paymentMethod, 
-    requestDate,
-  } = req.body;
+  const { trxID, numberUsed, paymentMethod } = req.body;
 
   try {
-    if (!studentId || !courseId || !trxID || !plan) {
-      return res.status(400).json({ message: "Missing required fields for enrollment request." });
-    }
-
-    // 1. Find the student
-    const student = await User.findById(studentId);
-    if (!student) {
-      return res.status(404).json({ message: "Student not found." });
-    }
-    
-    // 2. Check if the student is already enrolled in this course
-    const isEnrolled = student.courses.some(c => c.courseId.toString() === courseId);
-    if (isEnrolled) {
-        return res.status(400).json({ message: `Already enrolled in ${courseTitle}.` });
-    }
-
-    // 3. Update the student's general payment fields (This is the "Request" part)
-    // IMPORTANT: Actual enrollment/course push should happen AFTER admin verification.
-    // For now, we update the latest payment attempt and set status to 'hold' 
-    // or log the request somewhere else (e.g., a separate 'EnrollmentRequest' model).
-
-    // --- Using a simplified update for demo purposes: ---
     await User.findByIdAndUpdate(studentId, {
       paymentMethod: paymentMethod || "Mobile Banking",
       trxID: trxID,
       numberUsed: numberUsed,
-      // Optional: Change status to 'hold' while payment verification is pending
-      // status: 'hold', 
     });
-
-    // 4. Return success message and data for the admin queue
-    return res.status(200).json({
-      message: "Enrollment request submitted successfully. Awaiting admin payment verification.",
-      enrollmentRequest: {
-        studentId,
-        courseId,
-        courseTitle,
-        plan,
-        trxID,
-        numberUsed,
-        amount,
-        requestDate,
-        status: 'PENDING_VERIFICATION'
-      }
-    });
-
+    return res.status(200).json({ message: "Payment info updated." });
   } catch (err) {
     console.error("[newEnrollRequest] Error:", err);
-    res.status(500).json({ message: "Server error during enrollment request." });
+    res.status(500).json({ message: "Server error." });
   }
 };
-
-// Add this to backend/controllers/users.controller.js
-// NOTE: This assumes you have a separate EnrollmentRequest model or mechanism 
-// to look up the request data, as it's not directly in the User model.
 
 export const getEnrollmentRequest = async (req, res) => {
-  const requestId = req.params.id;
+    // Placeholder for legacy support
+    res.status(200).json({ message: "Use /api/enrollments/ for requests." });
+};
+
+// --------------------------------------------------
+// NEW: SAVE QUIZ RESULT
+// Maps to: POST /api/users/:studentId/:quizId
+// --------------------------------------------------
+export const saveQuizResult = async (req, res) => {
+  const { studentId, quizId } = req.params;
+  const { score, rightAnswers, wrongAnswers, totalAnswered, answers } = req.body;
 
   try {
-    // ⚠️ REPLACE THIS: Query your specific EnrollmentRequest model or log/queue table here
-    // Example placeholder:
-    const mockRequest = { 
-        id: requestId, 
-        status: "PENDING_VERIFICATION", 
-        courseTitle: "Bangla", 
-        trxID: "9H7D...", 
-        paymentStatus: "Awaiting Admin Review" 
-    };
+    // 1. Check User
+    const user = await User.findById(studentId);
+    if (!user) return res.status(404).json({ message: "User not found" });
 
-    if (!mockRequest) {
-      return res.status(404).json({ message: "Enrollment request not found." });
+    // 2. Check if Quiz exists
+    const quiz = await Quiz.findById(quizId);
+    if (!quiz) return res.status(404).json({ message: "Quiz not found" });
+
+    // 3. CRITICAL: Check if already attended
+    const existingIndex = user.quizzesAttended.findIndex(
+        q => q.quizId.toString() === quizId
+    );
+
+    if (existingIndex > -1) {
+      // STRICT RULE: Do not allow re-submission / update
+      return res.status(403).json({ 
+          message: "You have already attempted this quiz. Retakes are not allowed.",
+          previousResult: user.quizzesAttended[existingIndex] 
+      });
     }
 
-    return res.status(200).json(mockRequest);
-    
+    // 4. Map detailed answers
+    const formattedDetails = answers ? answers.map(a => ({
+        questionId: a.question_id,
+        serialNo: a.serialNo || 0,
+        answer: a.answer
+    })) : [];
+
+    // 5. Create Result Object
+    const newResult = {
+      quizId: quiz._id,
+      quizTitle: quiz.quizTitle,
+      score: parseFloat(score),
+      totalAnswered: parseInt(totalAnswered) || 0,
+      rightAnswers: parseInt(rightAnswers) || 0,
+      wrongAnswers: parseInt(wrongAnswers) || 0,
+      details: formattedDetails,
+      submittedAt: new Date()
+    };
+
+    // 6. Save New Result
+    user.quizzesAttended.push(newResult);
+    await user.save();
+
+    console.log(`[saveQuizResult] Saved result for user ${user.username}, Quiz: ${quiz.quizTitle}`);
+    res.status(200).json({ message: "Quiz result saved successfully", result: newResult });
+
   } catch (err) {
-    console.error("[getEnrollmentRequest] Error:", err);
-    res.status(500).json({ message: "Server error fetching request." });
+    console.error("[saveQuizResult] Error:", err);
+    res.status(500).json({ message: "Server error saving quiz result" });
   }
 };
+// --------------------------------------------------
+// SAVE QUIZ RESULT (Modified: One Attempt Only)
+// --------------------------------------------------

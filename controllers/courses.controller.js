@@ -1,15 +1,15 @@
+// backend/controllers/courses.controller.js
+
 import Course from "../models/courses.model.js";
-import Media from "../models/media.model.js"; // ✅ Import Media to create docs on upload
+import Media from "../models/media.model.js"; 
+import Quiz from "../models/quizzes.model.js"; // ✅ CORRECTED: Use 'Quiz' alias for the model
 
 // --- HELPER: Handle File Upload & Create Media Document ---
-// If a file is uploaded via Multer, we must save it to the Media collection 
-// first to get an _id, because the Course model now expects ObjectIds.
 const processFileUpload = async (file, folder = "courses") => {
   if (!file) return null;
   
-  // Create URL based on your static serve setup
   const url = `/uploads/${file.filename}`;
-  const thumbUrl = `/uploads/${file.filename}`; // Or generate real thumb if needed
+  const thumbUrl = `/uploads/${file.filename}`; 
 
   const newMedia = await Media.create({
     filename: file.filename,
@@ -34,66 +34,44 @@ export const createCourse = async (req, res) => {
     const {
       title, description, category, subCategory, level, tags, language,
       startDate, endDate, duration, status,
-      "subscription.amount": subscriptionAmount,
-      "subscription.billingCycle": billingCycle,
-      "subscription.currency": currency,
-      "subscription.trialPeriodDays": trialPeriodDays,
+      "subscription.amount": subscriptionAmount, "subscription.billingCycle": billingCycle,
+      "subscription.currency": currency, "subscription.trialPeriodDays": trialPeriodDays,
       "subscription.active": subscriptionActive,
       
-      // IDs from frontend Media Library selection
-      courseImageId, 
-      videoPreviewId,
-      imageGalleryIds 
+      courseImageId, videoPreviewId, imageGalleryIds 
     } = req.body;
 
-    // 1. Handle Tags
+    // 1. Tags & Syllabus Parsing
     let tagsArr = [];
     if (tags) {
-      try {
-        tagsArr = Array.isArray(tags) ? tags : JSON.parse(tags);
-      } catch {
-        tagsArr = tags.split(",").map((t) => t.trim()).filter(Boolean);
-      }
+      try { tagsArr = Array.isArray(tags) ? tags : JSON.parse(tags); } catch { tagsArr = tags.split(",").map((t) => t.trim()).filter(Boolean); }
     }
 
-    // 2. Handle Syllabus
     let syllabusArr = [];
     if (req.body.syllabus) {
-      try {
-        syllabusArr = JSON.parse(req.body.syllabus);
-      } catch {
-        syllabusArr = [];
-      }
+      try { syllabusArr = JSON.parse(req.body.syllabus); } catch { syllabusArr = []; }
     }
 
     // 3. Handle Media (Priority: New File Upload > Library ID)
-    
-    // A. Course Image
     let courseImage = null;
     if (req.files && req.files["courseImage"] && req.files["courseImage"][0]) {
-      // Create Media doc for new file
       courseImage = await processFileUpload(req.files["courseImage"][0]);
     } else if (courseImageId) {
-      // Use existing ID
       courseImage = courseImageId; 
     }
 
-    // B. Video Preview
     let videoPreview = null;
     if (req.files && req.files["videoPreview"] && req.files["videoPreview"][0]) {
-       videoPreview = await processFileUpload(req.files["videoPreview"][0]);
+      videoPreview = await processFileUpload(req.files["videoPreview"][0]);
     } else if (videoPreviewId) {
-       videoPreview = videoPreviewId;
+      videoPreview = videoPreviewId;
     }
 
-    // C. Image Gallery
     let imageGallery = [];
-    // Add existing library IDs
     if (imageGalleryIds) {
-        const ids = Array.isArray(imageGalleryIds) ? imageGalleryIds : [imageGalleryIds];
-        imageGallery = [...imageGallery, ...ids];
+      const ids = Array.isArray(imageGalleryIds) ? imageGalleryIds : [imageGalleryIds];
+      imageGallery = [...imageGallery, ...ids];
     }
-    // Add new file uploads
     if (req.files && req.files["imageGallery"] && Array.isArray(req.files["imageGallery"])) {
       const uploadPromises = req.files["imageGallery"].map(file => processFileUpload(file));
       const newIds = await Promise.all(uploadPromises);
@@ -113,9 +91,7 @@ export const createCourse = async (req, res) => {
       title, description, category, subCategory, level, language,
       startDate, endDate, duration,
       tags: tagsArr,
-      courseImage, 
-      imageGallery, 
-      videoPreview, 
+      courseImage, imageGallery, videoPreview, 
       syllabus: syllabusArr,
       subscription,
       status: status || "draft",
@@ -127,10 +103,7 @@ export const createCourse = async (req, res) => {
 
     const savedCourse = await new Course(courseData).save();
     
-    res.status(201).json({
-      message: "Course created successfully",
-      course: savedCourse,
-    });
+    res.status(201).json({ message: "Course created successfully", course: savedCourse });
 
   } catch (error) {
     console.error("[courses.controller] Create Error:", error);
@@ -146,11 +119,8 @@ export const updateCourse = async (req, res) => {
   try {
     const { id } = req.params;
     
-    // Destructure media IDs from body, keep rest
     const { 
-        courseImageId, 
-        videoPreviewId, 
-        imageGalleryIds,
+        courseImageId, videoPreviewId, imageGalleryIds,
         ...otherFields 
     } = req.body;
 
@@ -162,8 +132,6 @@ export const updateCourse = async (req, res) => {
     if (req.files && req.files["courseImage"] && req.files["courseImage"][0]) {
       updatedFields.courseImage = await processFileUpload(req.files["courseImage"][0]);
     } else if (courseImageId !== undefined) {
-      // If sent (even empty string), update it. 
-      // If empty string -> null (removes image). If ID -> ID.
       updatedFields.courseImage = courseImageId || null; 
     }
 
@@ -176,39 +144,26 @@ export const updateCourse = async (req, res) => {
 
     // 3. Gallery
     let newGallery = [];
-    // Existing IDs from library
     if (imageGalleryIds) {
-        const ids = Array.isArray(imageGalleryIds) ? imageGalleryIds : [imageGalleryIds];
-        // Filter out '[]' string edge case
-        newGallery = ids.filter(id => id && id !== '[]');
-        if(imageGalleryIds === '[]') newGallery = [];
+        const ids = Array.isArray(imageGalleryIds) ? ids.filter(id => id && id !== '[]') : (imageGalleryIds !== '[]' ? [imageGalleryIds] : []);
+        newGallery = [...newGallery, ...ids];
     }
-    // New Uploads
     if (req.files && req.files["imageGallery"] && Array.isArray(req.files["imageGallery"])) {
        const uploadPromises = req.files["imageGallery"].map(f => processFileUpload(f));
        const newIds = await Promise.all(uploadPromises);
        newGallery = [...newGallery, ...newIds];
     }
 
-    // Only update gallery if inputs were provided
     if (imageGalleryIds !== undefined || (req.files && req.files["imageGallery"])) {
         updatedFields.imageGallery = newGallery;
     }
 
     // --- Parsing Complex Fields ---
     if (updatedFields.tags) {
-      try {
-        updatedFields.tags = JSON.parse(updatedFields.tags);
-      } catch {
-        updatedFields.tags = updatedFields.tags.split(",").map((t) => t.trim()).filter(Boolean);
-      }
+      try { updatedFields.tags = JSON.parse(updatedFields.tags); } catch { updatedFields.tags = updatedFields.tags.split(",").map((t) => t.trim()).filter(Boolean); }
     }
     if (updatedFields.syllabus) {
-      try {
-        updatedFields.syllabus = JSON.parse(updatedFields.syllabus);
-      } catch {
-        updatedFields.syllabus = [];
-      }
+      try { updatedFields.syllabus = JSON.parse(updatedFields.syllabus); } catch { updatedFields.syllabus = []; }
     }
     
     // --- Nested Subscription ---
@@ -219,7 +174,6 @@ export const updateCourse = async (req, res) => {
             currency: req.body["subscription.currency"],
             active: true 
         };
-        // Cleanup flat keys
         delete updatedFields["subscription.amount"];
         delete updatedFields["subscription.billingCycle"];
         delete updatedFields["subscription.currency"];
@@ -249,9 +203,9 @@ export const updateCourse = async (req, res) => {
 export const getCourseById = async (req, res) => {
   try {
     const course = await Course.findById(req.params.id)
-      .populate("courseImage")   // ✅ Populate to get full object (url, etc)
-      .populate("imageGallery")  // ✅ Populate array
-      .populate("videoPreview"); // ✅ Populate video
+      .populate("courseImage")   
+      .populate("imageGallery")  
+      .populate("videoPreview"); 
 
     if (!course) return res.status(404).json({ message: "Course not found" });
     res.status(200).json(course);
@@ -268,7 +222,7 @@ export const getCourseById = async (req, res) => {
 export const getAllCourses = async (req, res) => {
   try {
     const courses = await Course.find()
-      .populate("courseImage") // Optional: Populate to show thumbnails in list
+      .populate("courseImage")
       .sort({ createdAt: -1 });
       
     res.status(200).json(courses);
@@ -284,11 +238,28 @@ export const getAllCourses = async (req, res) => {
 export const deleteCourse = async (req, res) => {
   try {
     const { id } = req.params;
+
+    // 1. Find and Delete the Course
     const deletedCourse = await Course.findByIdAndDelete(id);
-    if (!deletedCourse) return res.status(404).json({ message: "Course not found" });
-    res.status(200).json({ message: "Course deleted successfully" });
+    
+    if (!deletedCourse) {
+      return res.status(404).json({ message: "Course not found" });
+    }
+
+    // 2. Delete Associated Quizzes
+    // Note: Quiz is imported as 'Quiz', not 'quiz' (lowercase)
+    const quizDeletionResult = await Quiz.deleteMany({ courseID: id });
+
+    console.log(`[courses.controller] Course deleted: ${deletedCourse.title}`);
+    console.log(`[courses.controller] Associated Quizzes deleted: ${quizDeletionResult.deletedCount}`);
+
+    res.status(200).json({ 
+      message: "Course and associated quizzes deleted successfully",
+      deletedQuizzesCount: quizDeletionResult.deletedCount 
+    });
+
   } catch (error) {
-    console.error("Error deleting course:", error);
+    console.error("[courses.controller] Error deleting course:", error);
     res.status(500).json({ message: "Server error deleting course" });
   }
 };

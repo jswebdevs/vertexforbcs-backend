@@ -1,6 +1,7 @@
 // backend/controllers/quizzes.controller.js
-
+import mongoose from "mongoose";
 import Quiz from "../models/quizzes.model.js";
+import User from "../models/users.model.js";
 
 // --------------------------------------------------
 // CREATE NEW QUIZ (Admin)
@@ -134,5 +135,54 @@ export const deleteQuiz = async (req, res) => {
   } catch (error) {
     console.error("[quizzes.controller] Error deleting quiz:", error);
     return res.status(500).json({ message: "Server error deleting quiz" });
+  }
+};
+
+export const getQuizLeaderboard = async (req, res) => {
+  try {
+    const { id } = req.params; // Quiz ID
+
+    // Use Aggregation to extract, filter, and sort specific quiz results from Users
+    const leaderboard = await User.aggregate([
+      // 1. Match users who have this quizId in their quizzesAttended array
+      {
+        $match: {
+          "quizzesAttended.quizId": new mongoose.Types.ObjectId(id),
+        },
+      },
+      // 2. Unwind the array (create one document per quiz attempt)
+      { $unwind: "$quizzesAttended" },
+      // 3. Filter again to keep ONLY the entry for this specific quiz
+      {
+        $match: {
+          "quizzesAttended.quizId": new mongoose.Types.ObjectId(id),
+        },
+      },
+      // 4. Sort by Score (Descending) and then Time (submittedAt Ascending)
+      {
+        $sort: {
+          "quizzesAttended.score": -1,
+          "quizzesAttended.submittedAt": 1, 
+        },
+      },
+      // 5. Project (Select) only the fields we need for the table
+      {
+        $project: {
+          _id: 0, // Don't need user ID for public list usually
+          firstName: 1,
+          lastName: 1,
+          avatar: 1,
+          score: "$quizzesAttended.score",
+          rightAnswers: "$quizzesAttended.rightAnswers",
+          wrongAnswers: "$quizzesAttended.wrongAnswers",
+          submittedAt: "$quizzesAttended.submittedAt",
+        },
+      },
+    ]);
+
+    res.status(200).json(leaderboard);
+  } catch (error) {
+    console.error("[getQuizLeaderboard] Error:", error);
+    res.status(500).json({ message: "Server error fetching leaderboard" });
   }
 };

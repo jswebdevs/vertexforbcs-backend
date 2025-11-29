@@ -1,5 +1,3 @@
-// backend/models/users.model.js
-
 import mongoose from "mongoose";
 import bcrypt from "bcryptjs";
 
@@ -17,8 +15,8 @@ const userSchema = new mongoose.Schema({
   // STUDENT-SPECIFIC FIELDS
   // -------------------------------
   contactNO: { type: String, trim: true },
-  
-  // Payment info for the *latest* transaction (optional, for history use a separate Transaction model)
+
+  // Payment info for the *latest* transaction
   paymentMethod: {
     type: String,
     enum: ["Cash", "bKash", "Rocket", "Credit Card", "Nagad", "Others", "Mobile Banking"],
@@ -27,27 +25,44 @@ const userSchema = new mongoose.Schema({
   numberUsed: { type: String, trim: true },
 
   // -------------------------------
-  // PER-COURSE SUBSCRIPTIONS (Modified)
+  // COURSE SUBSCRIPTIONS
   // -------------------------------
-  // This replaces the old 'activeSubscription' and simple 'courses' list.
-  // Each object here represents a specific access right to a specific course.
   courses: [
     {
       courseId: { type: mongoose.Schema.Types.ObjectId, ref: "Course", required: true },
-      title: { type: String }, // Optional snapshot of title
-      
-      // Which plan did they buy for THIS specific course?
-      plan: { 
-        type: String, 
+      title: { type: String },
+      plan: {
+        type: String,
         enum: ["1M", "2M", "3M", "6M", "Lifetime"],
-        required: true 
-      }, 
-      
-      // When does access to THIS course start and end?
+        required: true,
+      },
       startDate: { type: Date, default: Date.now },
-      expiryDate: { type: Date, required: true }, 
+      expiryDate: { type: Date, required: true },
+      isActive: { type: Boolean, default: true },
+    },
+  ],
+
+  // -------------------------------
+  // QUIZ RESULTS & HISTORY (Updated)
+  // -------------------------------
+  quizzesAttended: [
+    {
+      quizId: { type: mongoose.Schema.Types.ObjectId, ref: "Quiz", required: true },
+      quizTitle: { type: String }, // Snapshot of title for easy display
+      score: { type: Number, required: true },
+      totalAnswered: { type: Number, default: 0 },
+      rightAnswers: { type: Number, default: 0 },
+      wrongAnswers: { type: Number, default: 0 },
+      submittedAt: { type: Date, default: Date.now },
       
-      isActive: { type: Boolean, default: true }
+      // Detailed breakdown of answers (for review)
+      details: [
+        {
+          questionId: { type: String }, 
+          serialNo: { type: Number },
+          answer: { type: String } // Option selected (A, B, C, D)
+        }
+      ]
     },
   ],
 
@@ -67,15 +82,12 @@ const userSchema = new mongoose.Schema({
   },
   joinedAt: { type: Date, default: Date.now },
 
-  // REMOVED: activeSubscription (Global subscription is no longer needed)
-  
-  quizzesAttended: [{ type: mongoose.Schema.Types.ObjectId, ref: "Quiz" }],
   avatar: { type: String },
   lastLogin: { type: Date },
 
   loginMethod: {
     type: String,
-    enum: ["controller"], 
+    enum: ["controller"],
     default: "controller",
   },
 });
@@ -104,21 +116,16 @@ userSchema.methods.matchPassword = async function (enteredPassword) {
 // -------------------------------
 // HELPER METHOD: CHECK COURSE ACCESS
 // -------------------------------
-// Use this in your controllers/middleware to check if a user can view a course
 userSchema.methods.hasActiveCourse = function (courseIdToCheck) {
   const course = this.courses.find(
     (c) => c.courseId.toString() === courseIdToCheck.toString()
   );
 
-  if (!course) return false; // Not enrolled
+  if (!course) return false; 
 
-  // Check if today is before the expiry date
   const now = new Date();
   return course.isActive && course.expiryDate > now;
 };
 
-// -------------------------------
-// MODEL EXPORT
-// -------------------------------
 const User = mongoose.model("User", userSchema);
 export default User;
