@@ -11,6 +11,7 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
 // ffmpeg binary setup
+// Note: Ensure these paths are correct for your server environment (e.g., Linux vs Windows)
 ffmpeg.setFfmpegPath("C:\\ffm\\bin\\ffmpeg.exe");
 ffmpeg.setFfprobePath("C:\\ffm\\bin\\ffprobe.exe");
 
@@ -47,61 +48,49 @@ async function generateVideoThumb(filePath, thumbPath) {
 
 export async function addMedia(req, res) {
   try {
+    // 1. Files are ALREADY uploaded to Cloudinary by the middleware before reaching here
     const files = req.files;
     if (!files || files.length === 0) return res.status(400).json({ error: "No files uploaded" });
 
-    const baseUrl = "https://vertexforbcs-backend.onrender.com"; // adjust as needed
-    const mediaDocs = [];
+    const mediaDocs = files.map((file) => {
+      // Cloudinary returns the secure URL in file.path
+      let url = file.path;
+      let thumbUrl = null;
 
-    await Promise.all(
-      files.map(async (file) => {
-        const folder = getFolderByMime(file.mimetype);
-        const filePath = file.path;
-        let thumbUrl = null;
+      // 2. AUTOMATIC THUMBNAILS
+      // Cloudinary allows on-the-fly transformations.
+      // We just modify the URL string to request a thumbnail.
+      
+      if (file.mimetype.startsWith('image')) {
+        // Example: insert '/w_200,h_200,c_fit/' into the URL for a 200px thumb
+        // Or simply store the base URL and generate thumb URLs on the frontend
+        const parts = url.split('/upload/');
+        thumbUrl = `${parts[0]}/upload/w_200,h_200,c_fit/${parts[1]}`;
+      } 
+      else if (file.mimetype.startsWith('video')) {
+        // Cloudinary auto-generates video thumbnails if you change extension to .jpg
+        // and replace /upload/ with /upload/so_0/ (frame at 0 seconds)
+        let tempUrl = url.replace('.mp4', '.jpg').replace('.webm', '.jpg');
+        const parts = tempUrl.split('/upload/');
+        thumbUrl = `${parts[0]}/upload/w_200,h_200,c_fit,so_0/${parts[1]}`;
+      }
 
-        // Ensure subfolder exists
-        const uploadDir = path.join(__dirname, `../uploads/${folder}`);
-        if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir, { recursive: true });
-
-        try {
-          if (folder === "img") {
-            const thumbPath = path.join(uploadDir, "thumb-" + file.filename);
-            await generateImageThumb(filePath, thumbPath);
-            if (fs.existsSync(thumbPath)) {
-              thumbUrl = `${baseUrl}/uploads/${folder}/thumb-${file.filename}`;
-            }
-          } else if (folder === "vid") {
-            const thumbFilename = "thumb-" + file.filename + ".png";
-            const thumbPath = path.join(uploadDir, thumbFilename);
-            await generateVideoThumb(filePath, thumbPath);
-            if (fs.existsSync(thumbPath)) {
-              thumbUrl = `${baseUrl}/uploads/${folder}/${thumbFilename}`;
-            }
-          }
-        } catch (err) {
-          console.warn(`⚠️ Thumbnail generation failed for ${file.filename}:`, err.message);
-        }
-
-        const doc = {
-          filename: file.filename,
-          originalName: file.originalname,
-          mimeType: file.mimetype,
-          size: file.size,
-          folder,
-          uploadDate: new Date(),
-          url: `${baseUrl}/uploads/${folder}/${file.filename}`,
-          thumbUrl,
-          title: req.body.title || file.originalname,
-          description: req.body.description || "",
-          altText: req.body.altText || "",
-          tags: req.body.tags ? req.body.tags.split(",") : [],
-        };
-        mediaDocs.push(doc);
-      })
-    );
+      return {
+        filename: file.filename, // Cloudinary Public ID
+        originalName: file.originalname,
+        mimeType: file.mimetype,
+        size: file.size,
+        folder: file.mimetype.split('/')[0], // 'image' or 'video'
+        uploadDate: new Date(),
+        url: url,
+        thumbUrl: thumbUrl,
+        title: req.body.title || file.originalname,
+      };
+    });
 
     const created = await Media.insertMany(mediaDocs);
     res.status(201).json(created);
+
   } catch (err) {
     console.error("❌ Add media error:", err);
     res.status(500).json({ error: err.message });
