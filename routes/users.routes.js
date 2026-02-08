@@ -112,7 +112,7 @@ router.get("/me", verifyToken, studentOnly, async (req, res) => {
 });
 
 // 8. ✅ SAVE QUIZ RESULT (New Route)
-// Maps to: https://backend.vertexforbcs.org//api/users/:studentId/:quizId
+// Maps to: https://vertexforbcs-backend.onrender.com//api/users/:studentId/:quizId
 router.post("/:studentId/:quizId", verifyToken, async (req, res) => {
     console.log(`[users.routes] POST Quiz Result for Student: ${req.params.studentId}`);
     await saveQuizResult(req, res);

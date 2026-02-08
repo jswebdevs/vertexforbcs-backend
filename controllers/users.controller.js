@@ -446,7 +446,7 @@ export const updateAvatar = async (req, res) => {
         
         // --- IMPORTANT: Convert path to public URL ---
         // path.basename is now defined because you imported 'path'
-        const avatarUrl = `https://backend.vertexforbcs.org/uploads/dp/${path.basename(localPath)}`; 
+        const avatarUrl = `https://vertexforbcs-backend.onrender.com/uploads/dp/${path.basename(localPath)}`; 
         
         // ... (User finding and security checks)
         const user = await User.findById(userId);
