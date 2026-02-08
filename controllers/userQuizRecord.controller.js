@@ -33,11 +33,18 @@ export const getUserQuizRecords = async (req, res) => {
 };
 
 // Get single user quiz record
+// Get single user quiz record
 export const getSingleUserQuizRecord = async (req, res) => {
   try {
-    const { userId, courseId, quizId } = req.params;
-    const record = await UserQuizRecord.findOne({ userId, courseId, quizId });
+    // REMOVED courseId from params because userId + quizId is unique enough
+    const { userId, quizId } = req.params; 
+    
+    // Find based only on user and quiz
+    const record = await UserQuizRecord.findOne({ userId, quizId });
+    
     if (!record) return res.status(404).json({ message: "Record not found" });
+    
+    // The answers are here: record.answers
     res.status(200).json(record);
   } catch (error) {
     console.error("Error fetching user quiz record:", error);

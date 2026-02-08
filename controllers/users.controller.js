@@ -2,9 +2,17 @@
 
 import User from "../models/users.model.js";
 import Quiz from "../models/quizzes.model.js"; // ✅ Imported Quiz to fetch titles
+import UserQuizRecord from "../models/userQuizRecord.model.js";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
+import path from "path";
+import multer from "multer"
+import nodemailer from "nodemailer"
+import OTP from "../models/otp.model.js"
+import dotenv from "dotenv"
 
+
+dotenv.config();
 // --------------------
 // HELPER: CALCULATE EXPIRY DATE
 // --------------------
@@ -25,6 +33,8 @@ const calculateExpiryDate = (plan) => {
       return new Date(now.setDate(now.getDate() + 30));
   }
 };
+
+
 
 // --------------------
 // STUDENT REGISTRATION CONTROLLER
@@ -179,7 +189,7 @@ export const controllerLogin = async (req, res) => {
 export const getUsers = async (req, res) => {
   try {
     const users = await User.find({ userType: "student" })
-      .select("-password")
+      .select("-password -quizzesAttended.details")
       .sort({ joinedAt: -1 })
       .lean();
 
@@ -202,7 +212,10 @@ export const getUsers = async (req, res) => {
 
 export const getUser = async (req, res) => {
   try {
-    const user = await User.findById(req.params.id).select("-password");
+    // Exclude the 'details' field from the quizzesAttended array to keep response light
+    const user = await User.findById(req.params.id)
+        .select("-password -quizzesAttended.details"); 
+
     if (!user) return res.status(404).json({ message: "User not found" });
     res.json(user);
   } catch (err) {
@@ -213,8 +226,27 @@ export const getUser = async (req, res) => {
 
 export const updateUser = async (req, res) => {
   try {
-    const user = await User.findByIdAndUpdate(req.params.id, req.body, { new: true }).select("-password");
+    const { id } = req.params;
+    
+    // Separate password from the rest of the data
+    const { password, ...updateData } = req.body;
+
+    // IF a password is provided, hash it and add it to updateData
+    if (password && password.trim() !== "") {
+      const salt = await bcrypt.genSalt(10);
+      const hashedPassword = await bcrypt.hash(password, salt);
+      updateData.password = hashedPassword;
+    }
+
+    // Update user using the modified updateData
+    const user = await User.findByIdAndUpdate(
+      id, 
+      updateData, 
+      { new: true, runValidators: true }
+    ).select("-password");
+
     if (!user) return res.status(404).json({ message: "User not found" });
+
     res.json(user);
   } catch (err) {
     console.error("[updateUser] Error:", err);
@@ -284,62 +316,318 @@ export const getEnrollmentRequest = async (req, res) => {
 // Maps to: POST /api/users/:studentId/:quizId
 // --------------------------------------------------
 export const saveQuizResult = async (req, res) => {
-  const { studentId, quizId } = req.params;
-  const { score, rightAnswers, wrongAnswers, totalAnswered, answers } = req.body;
+  const { studentId, quizId } = req.params;
+  const { score, rightAnswers, wrongAnswers, totalAnswered, answers } = req.body;
 
-  try {
-    // 1. Check User
-    const user = await User.findById(studentId);
-    if (!user) return res.status(404).json({ message: "User not found" });
+  // --- 1. ATOMIC DUPLICATE CHECK & INITIAL VALIDATIONS ---
+  try {
+    // Check if already attended using the dedicated record model
+    const alreadyAttended = await UserQuizRecord.findOne({ userId: studentId, quizId: quizId });
+    
+    if (alreadyAttended) {
+        // FIX: Use HTTP 409 Conflict for resource already existing
+        console.log(`[saveQuizResult] Duplicate submission blocked for User ${studentId} on Quiz ${quizId}`);
+        return res.status(409).json({ message: "Quiz already attempted. Duplicate submission blocked." });
+    }
 
-    // 2. Check if Quiz exists
-    const quiz = await Quiz.findById(quizId);
-    if (!quiz) return res.status(404).json({ message: "Quiz not found" });
+    const user = await User.findById(studentId);
+    if (!user) return res.status(404).json({ message: "User not found" });
+    
+    const quiz = await Quiz.findById(quizId);
+    if (!quiz) return res.status(404).json({ message: "Quiz not found" });
 
-    // 3. CRITICAL: Check if already attended
-    const existingIndex = user.quizzesAttended.findIndex(
-        q => q.quizId.toString() === quizId
+    // --- 2. Create Full Detailed Record in UserQuizRecord (The "Heavy" Data) ---
+    const finishedAtTime = new Date();
+
+    const detailedRecord = await UserQuizRecord.create({
+        userId: studentId,
+        quizId: quizId,
+        courseId: quiz.courseID, 
+        score: parseFloat(score),
+        totalAnswered: parseInt(totalAnswered) || 0,
+        rightAnswers: parseInt(rightAnswers) || 0,
+        wrongAnswers: parseInt(wrongAnswers) || 0,
+        answers: answers, // Full Q&A details
+        finishedAt: finishedAtTime
+    });
+
+    // --- 3. Create Summary Object for User Profile (The "Light" Data) ---
+    const summaryResult = {
+      quizId: quiz._id,
+      quizTitle: quiz.quizTitle,
+      score: parseFloat(score),
+      totalAnswered: parseInt(totalAnswered) || 0,
+      rightAnswers: parseInt(rightAnswers) || 0,
+      wrongAnswers: parseInt(wrongAnswers) || 0,
+      submittedAt: finishedAtTime
+    };
+
+    // --- 4. Atomic Update User Profile ---
+    // FIX: Use findByIdAndUpdate with $push for atomic array update.
+    // This is generally safer than fetching, modifying, and saving (user.save()) 
+    // when dealing with array pushes in concurrent environments.
+    const updatedUser = await User.findByIdAndUpdate(
+        studentId,
+        { $push: { quizzesAttended: summaryResult } },
+        { new: true } // Return the updated document
     );
 
-    if (existingIndex > -1) {
-      // STRICT RULE: Do not allow re-submission / update
-      return res.status(403).json({ 
-          message: "You have already attempted this quiz. Retakes are not allowed.",
-          previousResult: user.quizzesAttended[existingIndex] 
-      });
+    if (!updatedUser) {
+        // If user was found earlier but somehow failed to update
+        throw new Error("Failed to atomically update user profile.");
     }
 
-    // 4. Map detailed answers
-    const formattedDetails = answers ? answers.map(a => ({
-        questionId: a.question_id,
-        serialNo: a.serialNo || 0,
-        answer: a.answer
-    })) : [];
+    console.log(`[saveQuizResult] Saved result for ${user.username}`);
+    res.status(200).json({ message: "Quiz result saved successfully", result: summaryResult });
 
-    // 5. Create Result Object
-    const newResult = {
-      quizId: quiz._id,
-      quizTitle: quiz.quizTitle,
-      score: parseFloat(score),
-      totalAnswered: parseInt(totalAnswered) || 0,
-      rightAnswers: parseInt(rightAnswers) || 0,
-      wrongAnswers: parseInt(wrongAnswers) || 0,
-      details: formattedDetails,
-      submittedAt: new Date()
-    };
+  } catch (err) {
+    console.error("[saveQuizResult] Error:", err);
+    // Handle potential database errors (like unique index violation if you add one)
+    res.status(500).json({ message: "Server error saving quiz result" });
+  }
+};
 
-    // 6. Save New Result
-    user.quizzesAttended.push(newResult);
-    await user.save();
 
-    console.log(`[saveQuizResult] Saved result for user ${user.username}, Quiz: ${quiz.quizTitle}`);
-    res.status(200).json({ message: "Quiz result saved successfully", result: newResult });
+export const getStudentQuizResult = async (req, res) => {
+  const { studentId, quizId } = req.params;
+
+  try {
+    // STRATEGY 1: Check the new 'UserQuizRecord' collection (The separate model)
+    let record = await UserQuizRecord.findOne({ userId: studentId, quizId: quizId });
+
+    // STRATEGY 2: Fallback to 'User' collection (Legacy embedded data)
+    if (!record) {
+      console.log("Record not found in UserQuizRecord, checking User profile...");
+      
+      // Find the user and specifically pull the quizzesAttended array
+      const user = await User.findById(studentId).select("quizzesAttended");
+      
+      if (user && user.quizzesAttended) {
+        // Find the specific quiz in the array
+        const embeddedRecord = user.quizzesAttended.find(
+          (q) => q.quizId.toString() === quizId
+        );
+        
+        // If found, map it to look like a standard record
+        if (embeddedRecord) {
+            record = {
+                // Spread existing data
+                ...embeddedRecord.toObject(), 
+                // Ensure compatibility fields
+                userId: studentId,
+                answers: embeddedRecord.details || [] // Map 'details' to 'answers' if needed
+            };
+        }
+      }
+    }
+
+    if (!record) {
+      return res.status(404).json({ message: "Detailed quiz record not found." });
+    }
+
+    res.status(200).json(record);
 
   } catch (err) {
-    console.error("[saveQuizResult] Error:", err);
-    res.status(500).json({ message: "Server error saving quiz result" });
+    console.error("[getStudentQuizResult] Error:", err);
+    res.status(500).json({ message: "Server error fetching quiz result" });
   }
 };
-// --------------------------------------------------
-// SAVE QUIZ RESULT (Modified: One Attempt Only)
-// --------------------------------------------------
+
+export const updateAvatar = async (req, res) => {
+    try {
+        const userId = req.params.id;
+        
+        // Multer puts the local file path on req.file.path
+        const localPath = req.file?.path; 
+        
+        if (!localPath) {
+            return res.status(400).json({ message: "No avatar file provided or invalid file type." });
+        }
+        
+        // --- IMPORTANT: Convert path to public URL ---
+        // path.basename is now defined because you imported 'path'
+        const avatarUrl = `https://backend.vertexforbcs.org/uploads/dp/${path.basename(localPath)}`; 
+        
+        // ... (User finding and security checks)
+        const user = await User.findById(userId);
+        if (!user) return res.status(404).json({ message: "User not found." });
+
+
+        // Update the avatar field
+        user.avatar = avatarUrl;
+        await user.save();
+
+        res.status(200).json({ 
+            message: "Avatar updated successfully.", 
+            avatarUrl: user.avatar,
+            user: { _id: user._id, avatar: user.avatar, email: user.email } 
+        });
+    } catch (err) {
+        console.error("[updateAvatar] Error:", err.message);
+        
+        // Catch Multer errors here, now that 'multer' is defined
+        if (err instanceof multer.MulterError) { // <-- FIX 3: 'multer' is now defined
+             return res.status(400).json({ message: `File Upload Error: ${err.message}` });
+        }
+        // Catch other errors, including potential errors from disk writing
+        if (err.code === 'ENOENT') {
+            return res.status(500).json({ message: "Server error: Target upload folder does not exist." });
+        }
+        res.status(500).json({ message: "Server error updating avatar." });
+    }
+};
+
+export const updatePassword = async (req, res) => {
+    try {
+        const userId = req.params.id;
+        const { currentPassword, newPassword } = req.body;
+
+        if (!currentPassword || !newPassword) {
+            return res.status(400).json({ message: "Current and new password are required." });
+        }
+        
+        const user = await User.findById(userId);
+        if (!user) return res.status(404).json({ message: "User not found." });
+
+        // 1. Check if the current password is correct
+        const isMatch = await user.matchPassword(currentPassword);
+        if (!isMatch) {
+            return res.status(401).json({ message: "Invalid current password." });
+        }
+
+        // 2. Hash the new password and save (pre-save hook handles hashing)
+        user.password = newPassword; 
+        await user.save(); // The pre-save hook in userSchema will hash this new password
+
+        res.status(200).json({ message: "Password updated successfully." });
+    } catch (err) {
+        console.error("[updatePassword] Error:", err);
+        res.status(500).json({ message: "Server error updating password." });
+    }
+};
+
+
+// --- Configuration ---
+
+// 1. Configure Transporter for Custom Domain (Webuzo/cPanale)
+
+const transporter = nodemailer.createTransport({
+  host: "mail.vertexforbcs.org",
+  port: 465,
+  secure: true,
+  auth: {
+    user: process.env.SMTP_MAIL, // Ensure .env matches this name
+    pass: process.env.SMTP_PASS,
+  },
+  tls: {
+    rejectUnauthorized: false
+  },
+  authMethod: 'LOGIN' // Critical fix for your cPanel server
+});
+
+const generateEmailTemplate = (otpCode) => {
+  return `
+    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #e0e0e0; border-radius: 10px; background-color: #ffffff;">
+      <div style="text-align: center; border-bottom: 2px solid #4CAF50; padding-bottom: 10px; margin-bottom: 20px;">
+        <h2 style="color: #4CAF50; margin: 0;">Vertex for BCS</h2>
+        <p style="color: #666; font-size: 14px; margin-top: 5px;">Your Success Partner</p>
+      </div>
+      <p style="color: #333; font-size: 16px;">Hello,</p>
+      <p style="color: #555; line-height: 1.5;">We received a request to reset your password. Use the OTP below:</p>
+      <div style="background-color: #f9f9f9; border: 1px dashed #4CAF50; padding: 15px; text-align: center; font-size: 28px; font-weight: bold; letter-spacing: 5px; color: #333; margin: 20px 0; border-radius: 5px;">
+        ${otpCode}
+      </div>
+      <p style="color: #555;">Valid for <strong>5 minutes</strong>.</p>
+    </div>
+  `;
+};
+
+// --- Controllers ---
+
+// A. Send Forgot Password OTP
+export const sendForgotPasswordOTP = async (req, res) => {
+  try {
+    const { email } = req.body;
+
+    const user = await User.findOne({ email });
+    if (!user) {
+      return res.status(404).json({ message: "User with this email does not exist." });
+    }
+
+    const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
+
+    // Upsert OTP (Update if exists, Insert if new)
+    await OTP.findOneAndUpdate(
+      { email },
+      { otp: otpCode, createdAt: Date.now() },
+      { upsert: true, new: true, setDefaultsOnInsert: true }
+    );
+
+    await transporter.sendMail({
+      from: `"Vertex Support" <${process.env.SMTP_MAIL}>`,
+      to: email,
+      subject: "Action Required: Your Password Reset OTP",
+      text: `Your OTP is ${otpCode}`,
+      html: generateEmailTemplate(otpCode),
+    });
+
+    res.status(200).json({ message: "OTP sent successfully. Please check your email." });
+
+  } catch (error) {
+    console.error("OTP Error:", error);
+    res.status(500).json({ message: "Failed to send OTP." });
+  }
+};
+
+// C. Verify OTP (Step 2)
+export const verifyOTP = async (req, res) => {
+  try {
+    const { email, otp } = req.body;
+
+    // Check if OTP exists for this email
+    const otpRecord = await OTP.findOne({ email, otp });
+
+    if (!otpRecord) {
+      return res.status(400).json({ message: "Invalid or expired OTP." });
+    }
+
+    // Success - just return 200 so frontend can move to Step 3
+    res.status(200).json({ message: "OTP verified." });
+
+  } catch (error) {
+    console.error("Verification Error:", error);
+    res.status(500).json({ message: "Verification failed." });
+  }
+};
+
+// B. Reset Password with OTP
+export const resetPasswordWithOTP = async (req, res) => {
+  try {
+    const { email, otp, newPassword } = req.body;
+
+    const otpRecord = await OTP.findOne({ email, otp });
+
+    if (!otpRecord) {
+      return res.status(400).json({ message: "Invalid or expired OTP." });
+    }
+
+    // Hash new password
+    const salt = await bcrypt.genSalt(10);
+    const hashedPassword = await bcrypt.hash(newPassword, salt);
+
+    // Update User
+    await User.findOneAndUpdate(
+      { email },
+      { password: hashedPassword }
+    );
+
+    // Delete used OTP
+    await OTP.deleteOne({ email });
+
+    res.status(200).json({ message: "Password reset successfully. Please login." });
+
+  } catch (error) {
+    console.error("Reset Error:", error);
+    res.status(500).json({ message: "Failed to reset password." });
+  }
+};

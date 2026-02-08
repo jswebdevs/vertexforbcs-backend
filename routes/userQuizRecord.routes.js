@@ -11,6 +11,7 @@ const router = express.Router();
 
 router.post("/", verifyToken, createUserQuizRecord);
 // GET all records for a user/course/quiz
-router.get("/:userId/courses/:courseId/quizzes/:quizId/record", verifyToken, getSingleUserQuizRecord);
+router.get("/:userId/record/:quizId", getSingleUserQuizRecord);
+router.get("/:userId/record", verifyToken, getUserQuizRecords)
 
 export default router;

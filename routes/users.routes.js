@@ -11,13 +11,19 @@ import {
   deleteUser,
   checkUsernameOrEmail,
   newEnrollRequest,
-  saveQuizResult, // ✅ Imported new controller
+  saveQuizResult,
+  updateAvatar,
+  updatePassword,
+  sendForgotPasswordOTP,
+  verifyOTP,
+  resetPasswordWithOTP
 } from "../controllers/users.controller.js";
 import {
   verifyToken,
   adminOnly,
   studentOnly,
 } from "../middlewares/auth.middleware.js";
+import { upload } from "../middlewares/upload.middleware.js";
 
 const router = express.Router();
 
@@ -112,6 +118,32 @@ router.post("/:studentId/:quizId", verifyToken, async (req, res) => {
     await saveQuizResult(req, res);
 });
 
+// 9. ✅ UPDATE AVATAR
+// PATCH /api/users/:id/avatar
+router.patch("/:id/avatar", 
+    verifyToken, 
+    // 🛑 THIS IS THE CRITICAL LINE: Use Multer here
+    upload.single('avatar'), 
+    async (req, res) => {
+        console.log(`[users.routes] PATCH Avatar for ID: ${req.params.id}`);
+        // SECURITY CHECK: Ensure the token ID matches the param ID or user is admin
+        if (req.user.id !== req.params.id && req.user.userType !== 'admin') {
+             return res.status(403).json({ message: "Access denied." });
+        }
+        await updateAvatar(req, res);
+});
+
+
+// 10. ✅ UPDATE PASSWORD
+// PATCH /api/users/:id/password
+router.patch("/:id/password", verifyToken, async (req, res) => {
+    console.log(`[users.routes] PATCH Password for ID: ${req.params.id}`);
+    // SECURITY CHECK: Ensure the token ID matches the param ID or user is admin
+    if (req.user.id !== req.params.id && req.user.userType !== 'admin') {
+         return res.status(403).json({ message: "Access denied." });
+    }
+    await updatePassword(req, res);
+});
 
 // --------------------------------------------------
 // GENERAL USER ROUTES (Must come last to avoid conflicting with specific paths)
@@ -134,5 +166,9 @@ router.delete("/:id", verifyToken, adminOnly, async (req, res) => {
   console.log("[users.routes] DELETE /:id (Admin) -", req.params.id);
   await deleteUser(req, res);
 });
+
+router.post("/send-otp", sendForgotPasswordOTP);
+router.post('/verify-otp', verifyOTP);
+router.post("/reset-password-otp", resetPasswordWithOTP);
 
 export default router;
