@@ -48,31 +48,35 @@ async function generateVideoThumb(filePath, thumbPath) {
 
 export async function addMedia(req, res) {
   try {
-    // 1. Files are ALREADY uploaded to Cloudinary by the middleware before reaching here
     const files = req.files;
     if (!files || files.length === 0) return res.status(400).json({ error: "No files uploaded" });
 
+    // Map files to your database schema
     const mediaDocs = files.map((file) => {
       // Cloudinary returns the secure URL in file.path
       let url = file.path;
       let thumbUrl = null;
 
-      // 2. AUTOMATIC THUMBNAILS
-      // Cloudinary allows on-the-fly transformations.
-      // We just modify the URL string to request a thumbnail.
-      
+      // Generate Cloudinary Thumbnail URLs
       if (file.mimetype.startsWith('image')) {
-        // Example: insert '/w_200,h_200,c_fit/' into the URL for a 200px thumb
-        // Or simply store the base URL and generate thumb URLs on the frontend
+        // Insert transformation for 200x200 fit
+        // Example: .../upload/w_200,h_200,c_fit/v1234/name.jpg
         const parts = url.split('/upload/');
-        thumbUrl = `${parts[0]}/upload/w_200,h_200,c_fit/${parts[1]}`;
+        if (parts.length === 2) {
+            thumbUrl = `${parts[0]}/upload/w_200,h_200,c_fit/${parts[1]}`;
+        } else {
+            thumbUrl = url; // Fallback
+        }
       } 
       else if (file.mimetype.startsWith('video')) {
-        // Cloudinary auto-generates video thumbnails if you change extension to .jpg
-        // and replace /upload/ with /upload/so_0/ (frame at 0 seconds)
-        let tempUrl = url.replace('.mp4', '.jpg').replace('.webm', '.jpg');
+        // Replace extension with .jpg and add video thumbnail params
+        let tempUrl = url.replace(/\.(mp4|webm|mov|avi)$/i, '.jpg');
         const parts = tempUrl.split('/upload/');
-        thumbUrl = `${parts[0]}/upload/w_200,h_200,c_fit,so_0/${parts[1]}`;
+        if (parts.length === 2) {
+            thumbUrl = `${parts[0]}/upload/w_200,h_200,c_fit,so_0/${parts[1]}`;
+        } else {
+            thumbUrl = tempUrl;
+        }
       }
 
       return {
@@ -80,11 +84,17 @@ export async function addMedia(req, res) {
         originalName: file.originalname,
         mimeType: file.mimetype,
         size: file.size,
-        folder: file.mimetype.split('/')[0], // 'image' or 'video'
+        
+        // 👇 FIX: Use the helper to get "img" or "vid" instead of "image"
+        folder: getFolderByMime(file.mimetype), 
+        
         uploadDate: new Date(),
         url: url,
         thumbUrl: thumbUrl,
         title: req.body.title || file.originalname,
+        description: req.body.description || "",
+        altText: req.body.altText || "",
+        tags: req.body.tags ? req.body.tags.split(",") : [],
       };
     });
 
